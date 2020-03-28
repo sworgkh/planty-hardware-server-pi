@@ -10,7 +10,7 @@ import subprocess
 import logging
 import RPi.GPIO as GPIO
 GPIO.setmode(GPIO.BCM)
-
+MY_ID ="e0221623-fb88-4fbd-b524-6f0092463c93"
 
 process = None
 logger = logging.getLogger('websockets')
@@ -110,39 +110,60 @@ def videoStreamOff():
     subprocess.call("killall run_video",shell=True)                     
 
 def on_message(message):
+    global MY_ID
     global isUVOn
     global UV_LAMP_PIN
-    command = (str)(message)
+    command = (str)(message).split(";")
     print(command)
+    if command[0]=="FROM_PLANTER" or command[1] != MY_ID: 
+        return "Ignore"
+
+    if command[2]=="UV_LAMP_ON": 
+        uvOn()
+        return "UV_LAMP_IS_ON"
     
-    if command=="UV_LAMP_ON": uvOn()
-    elif command=="UV_LAMP_OFF": uvOff()
-    elif command=="ADD_WATER": addWater()
-    elif command=="MOVE_CAMERA_RIGHT": cameraMove("R")
-    elif command=="MOVE_CAMERA_LEFT": cameraMove("L")
-    elif command=="VIDEO_STREAM_ON": videoStreamOn()
-    elif command=="VIDEO_STREAM_OFF": videoStreamOff()
+    elif command[2]=="UV_LAMP_OFF": 
+        uvOff()
+        return "UV_LAMP_IS_OFF"
+    
+    elif command[2]=="ADD_WATER": 
+        addWater()
+        return "WATER_ADDED"
+    
+    elif command[2]=="MOVE_CAMERA_RIGHT": 
+        cameraMove("R")
+        return "CAMERA_MOVED_RIGHT"
+    
+    elif command[2]=="MOVE_CAMERA_LEFT": 
+        cameraMove("L")
+        return "CAMERA_MOVED_LEFT"
+    
+    elif command[2]=="VIDEO_STREAM_ON": 
+        videoStreamOn()
+        return "STREAM_STARTED"
+    
+    elif command[2]=="VIDEO_STREAM_OFF": 
+        videoStreamOff()
+        return "STREAM_STOPPED"
+    
     else:
         print("Unknown Command: {0}".format(command))
-
-def on_error(ws, error):
-    print(error)
-
-def on_close(ws):
-    print("### closed ###")
-
+        return "FAILED"     
 
 async def websocket_handler():
     uri = "wss://0xl08k0h22.execute-api.eu-west-1.amazonaws.com/dev"
     async with websockets.connect(uri, ssl = True) as websocket:
         while True:
             message = await websocket.recv()
-            on_message(message)
+            result = on_message(message)
+            if result=="Ignore": pass
+            answer = input('{{\"action":"message","message":"FROM_PLANTER;e0221623-fb88-4fbd-b524-6f0092463c93;{0}"}}'.format(result))
+            #a = await websocket.send(answer)
+
 
 
 if __name__ == "__main__":
     try:
-        set_all_off()
         asyncio.get_event_loop().run_until_complete(websocket_handler())
     finally:
         GPIO.cleanup()
