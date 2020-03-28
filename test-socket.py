@@ -115,6 +115,7 @@ def on_message(message):
     global UV_LAMP_PIN
     command = (str)(message).split(";")
     print(command)
+    print(f'<<< {command[2]}')
     if command[0]=="FROM_PLANTER" or command[1] != MY_ID: 
         return "Ignore"
 
@@ -156,9 +157,13 @@ async def websocket_handler():
         while True:
             message = await websocket.recv()
             result = on_message(message)
-            if result=="Ignore": pass
-            answer = input('{{\"action":"message","message":"FROM_PLANTER;e0221623-fb88-4fbd-b524-6f0092463c93;{0}"}}'.format(result))
-            #a = await websocket.send(answer)
+            if result=="Ignore": 
+                print('Ignore')
+                continue
+            
+            answer = '{{\"action":"message","message":"FROM_PLANTER;e0221623-fb88-4fbd-b524-6f0092463c93;{0}"}}'.format(result)
+            await websocket.send(answer)
+            print(f'>>> {result}')
 
 
 
