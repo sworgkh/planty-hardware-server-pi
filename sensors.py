@@ -18,7 +18,7 @@ plantersMeasurementsTable = dynamodb.Table('PlantersMeasurements')
 
 
 MY_ID = "e0221623-fb88-4fbd-b524-6f0092463c93"
-soilHumidity = -1
+soilHumidity = 331
 saveLaps = -60
 
 
@@ -55,13 +55,19 @@ async def websocket_handler():
             bme280 = adafruit_bme280.Adafruit_BME280_I2C(i2c, 0x76)
             ser = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
             ser.flush()
-
+            maxHumidity = 701
+            minHumidity = 331
             while True:
                 if ser.in_waiting > 0:
                     soilHumidity = decimal.Decimal(
                         ser.readline().decode('utf-8').rstrip())
+                    if(minHumidity > soilHumidity):
+                        minHumidity = soilHumidity
+                    if(maxHumidity < soilHumidity):
+                        maxHumidity = soilHumidity
+                        
                     soilHumidity = (
-                        100-int((soilHumidity-330) * 100 / (701-331)))/100
+                        100-int((soilHumidity-minHumidity) * 100 / (maxHumidity-minHumidity)))/100
 
                 uv_raw = uv.uv_raw
                 temperature = bme280.temperature
