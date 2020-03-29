@@ -1,21 +1,8 @@
-#!/usr/bin/python
-import RPi.GPIO as GPIO
-import time
- 
-#GPIO SETUP
-channel = 23
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(channel, GPIO.IN)
- 
-def callback(channel):
-        if GPIO.input(channel):
-                print ("Dry {0}".format(GPIO.input(channel)) )
-        else:
-                print ("Water!")
- 
-GPIO.add_event_detect(channel, GPIO.BOTH, bouncetime=300)  # let us know when the pin goes HIGH or LOW
-GPIO.add_event_callback(channel, callback)  # assign function to GPIO PIN, Run function on change
- 
-# infinite loop
-while True:
-        time.sleep(1)
+import serial
+if __name__ == '__main__':
+    ser = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
+    ser.flush()
+    while True:
+        if ser.in_waiting > 0:
+            line = ser.readline().decode('utf-8').rstrip()
+            print(line)

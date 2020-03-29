@@ -1,12 +1,13 @@
-from Adafruit_BME280 import *
+import board
+import busio
+import adafruit_bme280
+import time
+import datetime
 
-sensor = BME280(t_mode=BME280_OSAMPLE_8, p_mode=BME280_OSAMPLE_8, h_mode=BME280_OSAMPLE_8)
 
-degrees = sensor.read_temperature()
-pascals = sensor.read_pressure()
-hectopascals = pascals / 100
-humidity = sensor.read_humidity()
-
-print 'Temp      = {0:0.3f} deg C'.format(degrees)
-print 'Pressure  = {0:0.2f} hPa'.format(hectopascals)
-print 'Humidity  = {0:0.2f} %'.format(humidity)
+i2c = busio.I2C(board.SCL, board.SDA)
+bme280 = adafruit_bme280.Adafruit_BME280_I2C(i2c,0x76)
+while True:
+    temperature = bme280.temperature
+    print(f'{datetime.datetime.now()}> Temperature: {temperature:0.3f} C')
+    time.sleep(5)

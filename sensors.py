@@ -2,7 +2,8 @@ import time
 import board
 import busio
 from adafruit_veml6070 import VEML6070
-from datetime import date
+import adafruit_bme280
+import datetime
 
 
 

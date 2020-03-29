@@ -1,11 +1,12 @@
-
 import asyncio
 import websockets
 import pathlib
 import ssl
-import json
-import time
+import time, datetime
 import subprocess
+import boto3
+import json
+import decimal
 
 import logging
 import RPi.GPIO as GPIO
@@ -156,6 +157,12 @@ async def websocket_handler():
     async with websockets.connect(uri, ssl = True) as websocket:
         while True:
             message = await websocket.recv()
+            if sum(map(lambda x : 1 if ';' in x else 0, message))!=2:
+                print(message)
+                print("Bad Command")
+                answer = '{{\"action":"message","message":"FROM_PLANTER;e0221623-fb88-4fbd-b524-6f0092463c93;BAD_COMMAND"}}'
+                await websocket.send(answer)    
+                continue
             result = on_message(message)
             if result=="Ignore": 
                 print('Ignore')
