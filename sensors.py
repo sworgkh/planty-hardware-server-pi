@@ -48,7 +48,7 @@ async def websocket_handler():
     uri = "wss://0xl08k0h22.execute-api.eu-west-1.amazonaws.com/dev"
     global soilHumidity
     global saveLaps
-    
+
     async with websockets.connect(uri, ssl=True) as websocket:
         with busio.I2C(board.SCL, board.SDA) as i2c:
             uv = VEML6070(i2c, "VEML6070_4_T")
@@ -60,6 +60,8 @@ async def websocket_handler():
                 if ser.in_waiting > 0:
                     soilHumidity = decimal.Decimal(
                         ser.readline().decode('utf-8').rstrip())
+                    soilHumidity = (
+                        100-int((soilHumidity-330) * 100 / (701-331)))/100
 
                 uv_raw = uv.uv_raw
                 temperature = bme280.temperature
