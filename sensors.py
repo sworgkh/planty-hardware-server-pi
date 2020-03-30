@@ -31,7 +31,7 @@ def saveMeasurementsToDb(ambientTemperatureCelsius, uvIntesity, soilHumidity):
                 'planterId': MY_ID,
                 'timeStamp':   timeStamp,
                 "uvIntesity": uvIntesity,
-                "soilHumidity": soilHumidity,
+                "soilHumidity": decimal.Decimal(str(soilHumidity)),
                 "ambientTemperatureCelsius": decimal.Decimal(str(ambientTemperatureCelsius))
             }
         )
@@ -65,7 +65,7 @@ async def websocket_handler():
                         minHumidity = soilHumidity
                     if(maxHumidity < soilHumidity):
                         maxHumidity = soilHumidity
-                        
+
                     soilHumidity = (
                         100-int((soilHumidity-minHumidity) * 100 / (maxHumidity-minHumidity)))/100
 
@@ -80,7 +80,10 @@ async def websocket_handler():
 
                 if(saveLaps % 10 == 0):
                     message = f'{{\"action":"message","message":"FROM_PLANTER;{MY_ID};MEASUREMENTS;T:{temperature};UV:{uv_raw};SH:{soilHumidity}"}}'
-                    await websocket.send(message)
+                    try:
+                        await websocket.send(message)
+                    except:
+                        print("Websocket Unexpected error:", sys.exc_info()[0])
 
                 time.sleep(5)
                 saveLaps = saveLaps+5 if saveLaps < 60 else 0

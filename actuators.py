@@ -143,7 +143,10 @@ def saveActionToDb(actionType, actionValue):
         }
     )
 
-    print(json.dumps(response, indent=4, cls=DecimalEncoder))
+    if(response["ResponseMetadata"]["HTTPStatusCode"] == 200):
+        print(f"Saved {actionType}_{actionValue} To Database.")
+    else:
+        print(f"Failed To Save {actionType}_{actionValue}")
 
 
 def on_message(message):
