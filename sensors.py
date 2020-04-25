@@ -11,6 +11,8 @@ import adafruit_bme280
 import boto3
 import json
 from plantyutils import DecimalEncoder
+import sys
+import RPi.GPIO as GPIO
 
 dynamodb = boto3.resource('dynamodb', region_name='eu-west-1',
                           endpoint_url="https://dynamodb.eu-west-1.amazonaws.com")
@@ -50,6 +52,7 @@ async def websocket_handler():
     global saveLaps
 
     async with websockets.connect(uri, ssl=True) as websocket:
+        print("Connected to Websocket")
         with busio.I2C(board.SCL, board.SDA) as i2c:
             uv = VEML6070(i2c, "VEML6070_4_T")
             bme280 = adafruit_bme280.Adafruit_BME280_I2C(i2c, 0x76)
@@ -57,15 +60,11 @@ async def websocket_handler():
             ser.flush()
             maxHumidity = 701
             minHumidity = 331
+
             while True:
                 if ser.in_waiting > 0:
                     soilHumidity = decimal.Decimal(
                         ser.readline().decode('utf-8').rstrip())
-                    if(minHumidity > soilHumidity):
-                        minHumidity = soilHumidity
-                    if(maxHumidity < soilHumidity):
-                        maxHumidity = soilHumidity
-
                     soilHumidity = (
                         100-int((soilHumidity-minHumidity) * 100 / (maxHumidity-minHumidity)))/100
 
@@ -76,18 +75,38 @@ async def websocket_handler():
                     f'{datetime.datetime.now()} T:{temperature:0.3f} UV:{uv_raw} SHum:{soilHumidity}')
 
                 if(saveLaps == 0):
-                    saveMeasurementsToDb(temperature, uv_raw, soilHumidity)
+                    try:
+                        saveMeasurementsToDb(temperature, uv_raw, soilHumidity)
+                    except Exception as e:
+                        print("Failed  to save data to DynamoDB.")
+                        print(e)
 
                 if(saveLaps % 10 == 0):
                     message = f'{{\"action":"message","message":"FROM_PLANTER;{MY_ID};MEASUREMENTS;T:{temperature};UV:{uv_raw};SH:{soilHumidity}"}}'
                     try:
                         await websocket.send(message)
-                    except:
+                    except websockets.exceptions.ConnectionClosedOK:
+                        print("Disconnected.\n Trying to reconnet.\n")
+                        raise
+                    except Exception as e:
                         print("Websocket Unexpected error:", sys.exc_info()[0])
+                        raise
 
                 time.sleep(5)
                 saveLaps = saveLaps+5 if saveLaps < 60 else 0
 
 
 if __name__ == "__main__":
-    asyncio.get_event_loop().run_until_complete(websocket_handler())
+    try:
+        while True:
+            try:
+                asyncio.get_event_loop().run_until_complete(websocket_handler())
+            except websockets.exceptions.ConnectionClosedOK:
+                print("Connection closed by server.\n Reconnecting.\n")
+            except Exception as e:
+                print("Unexpected error:", sys.exc_info()[0])
+                print(e)
+                GPIO.cleanup()
+                raise
+    finally:
+        GPIO.cleanup()

@@ -9,6 +9,7 @@ import subprocess
 import boto3
 import json
 import decimal
+import sys
 
 import logging
 import RPi.GPIO as GPIO
@@ -154,7 +155,7 @@ def on_message(message):
     global isUVOn
     global UV_LAMP_PIN
     command = (str)(message).split(";")
-    print(command)
+    # print(command)
     print(f'<<< {command[2]}')
     if command[0] == "FROM_PLANTER" or command[1] != MY_ID:
         return "Ignore"
@@ -195,6 +196,7 @@ def on_message(message):
 async def websocket_handler():
     uri = "wss://0xl08k0h22.execute-api.eu-west-1.amazonaws.com/dev"
     async with websockets.connect(uri, ssl=True) as websocket:
+        print("Connected to Websocket\n")
         while True:
             message = await websocket.recv()
             semicolonCount = sum(map(lambda x: 1 if ';' in x else 0, message))
@@ -215,7 +217,13 @@ async def websocket_handler():
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.get_event_loop().run_until_complete(websocket_handler())
-    finally:
-        GPIO.cleanup()
+    while True:
+        try:
+            asyncio.get_event_loop().run_until_complete(websocket_handler())
+        except websockets.exceptions.ConnectionClosedOK:
+            print("Connection closed by server.\n Reconnecting.\n")
+        except:
+            print("Unexpected error:", sys.exc_info()[0])
+            raise
+        finally:
+            GPIO.cleanup()
