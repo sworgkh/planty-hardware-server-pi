@@ -6,6 +6,9 @@ import board
 import busio
 import serial
 import decimal
+import adafruit_ads1x15.ads1115 as ADS
+from adafruit_ads1x15.analog_in import AnalogIn
+import adafruit_ads1x15.ads1x15 as ads1x15
 from adafruit_veml6070 import VEML6070
 import adafruit_bme280
 import boto3
@@ -21,7 +24,7 @@ plantersMeasurementsTable = dynamodb.Table('PlantersMeasurements')
 
 MY_ID = "e0221623-fb88-4fbd-b524-6f0092463c93"
 soilHumidity = 331
-saveLaps = -60
+saveLaps = -1060
 
 
 def saveMeasurementsToDb(ambientTemperatureCelsius, uvIntesity, soilHumidity):
@@ -56,17 +59,18 @@ async def websocket_handler():
         with busio.I2C(board.SCL, board.SDA) as i2c:
             uv = VEML6070(i2c, "VEML6070_4_T")
             bme280 = adafruit_bme280.Adafruit_BME280_I2C(i2c, 0x76)
-            ser = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
-            ser.flush()
-            maxHumidity = 701
-            minHumidity = 331
+            
+            ads = ADS.ADS1115(i2c, mode = ads1x15.Mode.CONTINUOUS)
+            humiditySensor = AnalogIn(ads, ADS.P0)
+            
+            maxHumidity = 23150
+            minHumidity = 10500
+
 
             while True:
-                if ser.in_waiting > 0:
-                    soilHumidity = decimal.Decimal(
-                        ser.readline().decode('utf-8').rstrip())
-                    soilHumidity = (
-                        100-int((soilHumidity-minHumidity) * 100 / (maxHumidity-minHumidity)))/100
+                soilHumidityRaw = humiditySensor.value
+                print(f'H_Raw:{soilHumidityRaw}\n')
+                soilHumidity = (100-int((soilHumidityRaw-minHumidity) * 100 / (maxHumidity-minHumidity)))/100
 
                 uv_raw = uv.uv_raw
                 temperature = bme280.temperature
