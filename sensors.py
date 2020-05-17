@@ -24,7 +24,7 @@ plantersMeasurementsTable = dynamodb.Table('PlantersMeasurements')
 
 MY_ID = "e0221623-fb88-4fbd-b524-6f0092463c93"
 soilHumidity = 331
-saveLaps = -1060
+saveLaps = 60
 
 
 def saveMeasurementsToDb(ambientTemperatureCelsius, uvIntesity, soilHumidity):
@@ -70,13 +70,14 @@ async def websocket_handler():
             while True:
                 soilHumidityRaw = humiditySensor.value
                 print(f'H_Raw:{soilHumidityRaw}\n')
-                soilHumidity = (100-int((soilHumidityRaw-minHumidity) * 100 / (maxHumidity-minHumidity)))/100
+                soilHumidity = (100-float((soilHumidityRaw-minHumidity) * 100 / (maxHumidity-minHumidity)))/100
 
                 uv_raw = uv.uv_raw
                 temperature = bme280.temperature
+                airHumidity = bme280.humidity
 
                 print(
-                    f'{datetime.datetime.now()} T:{temperature:0.3f} UV:{uv_raw} SHum:{soilHumidity}')
+                    f'{datetime.datetime.now()} T:{temperature:0.3f} AH:{airHumidity:0.2f} UV:{uv_raw} SHum:{soilHumidity:0.3f}')
 
                 if(saveLaps == 0):
                     try:
