@@ -1,4 +1,4 @@
-from plantyutils import DecimalEncoder
+
 import asyncio
 import websockets
 import pathlib
@@ -10,11 +10,15 @@ import boto3
 import json
 import decimal
 import sys
-
 import logging
-import RPi.GPIO as GPIO
-GPIO.setmode(GPIO.BCM)
+# import RPi.GPIO as GPIO
+from dynamodb_json import json_util as dynamo_json
+
+from boto3.dynamodb.conditions import Key, Attr
+
+# GPIO.setmode(GPIO.BCM)
 MY_ID = "e0221623-fb88-4fbd-b524-6f0092463c93"
+GROWTH_PLAN = None
 
 process = None
 logger = logging.getLogger('websockets')
@@ -23,9 +27,9 @@ logger.addHandler(logging.StreamHandler())
 
 camera_motor_pins = [4, 17, 27, 22]
 
-for pin in camera_motor_pins:
-    GPIO.setup(pin, GPIO.OUT)
-    GPIO.output(pin, 0)
+# for pin in camera_motor_pins:
+    # GPIO.setup(pin, GPIO.OUT)
+    # GPIO.output(pin, 0)
 
 halfstep_seq_right = [
     [0, 0, 0, 1],
@@ -50,110 +54,23 @@ halfstep_seq_left = [
 ]
 
 # GPIO SETUP
-# We are using GPIO numbers Instead of Physical PIN numbers.
-UV_LAMP_GPIO = 24            # PIN 18
-WATER_CONTROL_GPIO = 25      # PIN 22
-HEATER_CONTROL_GPIO = 23     # PIN 16
-FAN_CONTROL_GPIO = 11        # PIN 23
+UV_LAMP_PIN = 24
+WATER_CONTROL_PIN = 25
+HEATER_CONTROL_PIN = 5
+FAN_CONTROL_PIN = 6
 
 isUVOn = False
 
 # GPIO.setwarnings(False)
-GPIO.setup(UV_LAMP_GPIO, GPIO.OUT, initial=1)
-GPIO.setup(WATER_CONTROL_GPIO, GPIO.OUT, initial=1)
-GPIO.setup(HEATER_CONTROL_GPIO, GPIO.OUT)
-GPIO.setup(FAN_CONTROL_GPIO, GPIO.OUT)
+# GPIO.setup(UV_LAMP_PIN, GPIO.OUT, initial=1)
+# GPIO.setup(WATER_CONTROL_PIN, GPIO.OUT, initial=1)
+# GPIO.setup(HEATER_CONTROL_PIN, GPIO.OUT)
+# GPIO.setup(FAN_CONTROL_PIN, GPIO.OUT)
 
 dynamodb = boto3.resource('dynamodb', region_name='eu-west-1',
                           endpoint_url="https://dynamodb.eu-west-1.amazonaws.com")
 plantersActionsTable = dynamodb.Table('PlantersActions')
 
-
-def uvOn():
-    global isUVOn
-    GPIO.output(UV_LAMP_PIN, 0)
-    isUVOn = True
-    print("UV On")
-    saveActionToDb('UV_LAMP', 'ON')
-
-
-def uvOff():
-    global isUVOn
-    GPIO.output(UV_LAMP_PIN, 1)
-    isUVOn = False
-    print("UV Off")
-    saveActionToDb('UV_LAMP', 'OFF')
-
-
-def addWater():
-    print("Adding Water")
-    GPIO.output(WATER_CONTROL_PIN, 0)
-    time.sleep(10)
-    GPIO.output(WATER_CONTROL_PIN, 1)
-    saveActionToDb('WATER', 'ADD')
-
-
-def moveCameraLeft():
-    print('move_left Camera')
-    for i in range(100):
-        for halfstep in range(8):
-            for pin in range(4):
-                GPIO.output(camera_motor_pins[pin],
-                            halfstep_seq_left[halfstep][pin])
-            time.sleep(0.001)
-    saveActionToDb('MOVE_CAMERA', 'LEFT')
-
-
-def moveCameraRight():
-    print('move_right Camera')
-    for i in range(100):
-        for halfstep in range(8):
-            for pin in range(4):
-                GPIO.output(camera_motor_pins[pin],
-                            halfstep_seq_right[halfstep][pin])
-            time.sleep(0.001)
-    saveActionToDb('MOVE_CAMERA', 'RIGHT')
-
-
-def cameraMove(direction):
-    if direction == "R":
-        moveCameraRight()
-    elif direction == "L":
-        moveCameraLeft()
-    else:
-        print("Bad Camera Direction: {0}".format(direction))
-
-
-def videoStreamOn():
-    global process
-    process = subprocess.Popen('/home/pi/Desktop/run_video',
-                               stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, shell=True)
-    saveActionToDb('VIDEO_STREAM', 'ON')
-
-
-def videoStreamOff():
-    global process
-    process.kill()
-    subprocess.call("killall kinesis_video_g", shell=True)
-    saveActionToDb('VIDEO_STREAM', 'OFF')
-
-
-def saveActionToDb(actionType, actionValue):
-    timeStamp = decimal.Decimal(datetime.datetime.utcnow().timestamp())
-    response = plantersActionsTable.put_item(
-        Item={
-            'planterId': MY_ID,
-            'timeStamp':    timeStamp,
-            'type': actionType,
-            'value': actionValue
-        }
-    )
-
-    if(response["ResponseMetadata"]["HTTPStatusCode"] == 200):
-        print(f"Saved {actionType}_{actionValue} To Database.")
-    else:
-        print(f"Failed To Save {actionType}_{actionValue}")
 
 def load_growth_plan():
     client = boto3.client('dynamodb')
@@ -209,20 +126,103 @@ def getNeededHumid():
     return subphase['soilHumidity']['min'], subphase['soilHumidity']['max']
 
 
+def uvOn():
+    print("UV On")
+    # GPIO.output(UV_LAMP_PIN, 0)
+    saveActionToDb('UV_LAMP', 'ON')
+
+
+def uvOff():
+    print("UV Off")
+    # GPIO.output(UV_LAMP_PIN, 1)
+    saveActionToDb('UV_LAMP', 'OFF')
+
+
+def addWater():
+    print("Adding Water")
+    # GPIO.output(WATER_CONTROL_PIN, 0)
+    time.sleep(3)
+    # GPIO.output(WATER_CONTROL_PIN, 1)
+    saveActionToDb('WATER', 'ADD')
+
+
+
+def moveCameraLeft():
+    print('move_left Camera')
+    for i in range(100):
+        for halfstep in range(8):
+            # for pin in range(4):
+                # GPIO.output(camera_motor_pins[pin],halfstep_seq_left[halfstep][pin])
+            time.sleep(0.001)
+    saveActionToDb('MOVE_CAMERA', 'LEFT')
+
+
+def moveCameraRight():
+    print('move_right Camera')
+    for i in range(100):
+        for halfstep in range(8):
+            # for pin in range(4):
+                # GPIO.output(camera_motor_pins[pin],    halfstep_seq_right[halfstep][pin])
+            time.sleep(0.001)
+    saveActionToDb('MOVE_CAMERA', 'RIGHT')
+
+
+def cameraMove(direction):
+    if direction == "R":
+        moveCameraRight()
+    elif direction == "L":
+        moveCameraLeft()
+    else:
+        print("Bad Camera Direction: {0}".format(direction))
+
+
+def videoStreamOn():
+    global process
+    process = subprocess.Popen('/home/pi/Desktop/run_video',
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, shell=True)
+    saveActionToDb('VIDEO_STREAM', 'ON')
+
+
+def videoStreamOff():
+    global process
+    process.kill()
+    subprocess.call("killall kinesis_video_g", shell=True)
+    saveActionToDb('VIDEO_STREAM', 'OFF')
+
+
+def saveActionToDb(actionType, actionValue):
+    timeStamp = decimal.Decimal(datetime.datetime.utcnow().timestamp())
+    response = plantersActionsTable.put_item(
+        Item={
+            'planterId': MY_ID,
+            'timeStamp': timeStamp,
+            'type': actionType,
+            'value': actionValue
+        }
+    )
+
+    if (response["ResponseMetadata"]["HTTPStatusCode"] == 200):
+        print(f"Saved {actionType}_{actionValue} To Database.")
+    else:
+        print(f"Failed To Save {actionType}_{actionValue}")
+
+
 def on_message(message):
     global MY_ID
     global isUVOn
     global UV_LAMP_PIN
     command = (str)(message).split(";")
+    # print(command)
     print(f'<<< {command[2]}')
     if command[0] == "FROM_PLANTER" or command[1] != MY_ID:
         return "Ignore"
 
-    if command[2] == "UV_LAMP_ON" and not isUVOn:
+    if command[2] == "UV_LAMP_ON":
         uvOn()
         return "UV_LAMP_IS_ON"
 
-    elif command[2] == "UV_LAMP_OFF" and isUVOn:
+    elif command[2] == "UV_LAMP_OFF":
         uvOff()
         return "UV_LAMP_IS_OFF"
 
@@ -245,6 +245,12 @@ def on_message(message):
     elif command[2] == "VIDEO_STREAM_OFF":
         videoStreamOff()
         return "STREAM_STOPPED"
+
+    elif command[2] == "RELOAD_GROWTH_PLAN":
+        load_growth_plan()
+        return "RELOADED"
+
+
 
     else:
         print("Unknown Command: {0}".format(command))
@@ -274,8 +280,17 @@ async def websocket_handler():
             print(f'>>> {result}')
 
 
+
+
 if __name__ == "__main__":
     retryCounter = 0
+
+    # loadGrowthPlan
+    load_growth_plan()
+
+    print('Temp: ', getNeededTemp())
+    print('Humidity: ', getNeededHumid())
+    print('UV: ', getNeededUV())
 
     while True and retryCounter < 20:
         try:
@@ -284,11 +299,12 @@ if __name__ == "__main__":
             print("Connection closed by server.\n Reconnecting.\n")
         except websockets.exceptions.ConnectionClosedError:
             print("Connection closed by server error.\n Reconnecting.\n")
-            retryCounter = retryCounter+1
+            retryCounter = retryCounter + 1
         except:
             print("Unexpected error:", sys.exc_info()[0])
             raise
         finally:
-            GPIO.cleanup()
+            pass
+            # GPIO.cleanup()
 
-    GPIO.cleanup()
+    # GPIO.cleanup()

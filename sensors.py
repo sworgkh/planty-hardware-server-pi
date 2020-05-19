@@ -26,11 +26,10 @@ MY_ID = "e0221623-fb88-4fbd-b524-6f0092463c93"
 soilHumidity = 331
 saveLaps = 60
 
-
 def saveMeasurementsToDb(ambientTemperatureCelsius, uvIntesity, soilHumidity):
     timeStamp = decimal.Decimal(datetime.datetime.utcnow().timestamp())
-    try:
 
+    try:
         response = plantersMeasurementsTable.put_item(
             Item={
                 'planterId': MY_ID,
@@ -40,6 +39,7 @@ def saveMeasurementsToDb(ambientTemperatureCelsius, uvIntesity, soilHumidity):
                 "ambientTemperatureCelsius": decimal.Decimal(str(ambientTemperatureCelsius))
             }
         )
+
         if(response["ResponseMetadata"]["HTTPStatusCode"] == 200):
             print("Saved To Database.")
         else:
@@ -57,15 +57,21 @@ async def websocket_handler():
     async with websockets.connect(uri, ssl=True) as websocket:
         print("Connected to Websocket")
         with busio.I2C(board.SCL, board.SDA) as i2c:
-            uv = VEML6070(i2c, "VEML6070_4_T")
-            bme280 = adafruit_bme280.Adafruit_BME280_I2C(i2c, 0x76)
+            try:
+                uv = VEML6070(i2c, "VEML6070_4_T")
+                bme280 = adafruit_bme280.Adafruit_BME280_I2C(i2c, 0x76)
+                ads = ADS.ADS1115(i2c, mode = ads1x15.Mode.CONTINUOUS)
+                humiditySensor = AnalogIn(ads, ADS.P0)
+            except:
+                print(f'Failed to initiate Sensor:\n{sys.exc_info()[0]}')
+                raise
+                #TODO Add Sensors exceptions and implement retry
+
             
-            ads = ADS.ADS1115(i2c, mode = ads1x15.Mode.CONTINUOUS)
-            humiditySensor = AnalogIn(ads, ADS.P0)
+            
             
             maxHumidity = 23150
             minHumidity = 10500
-
 
             while True:
                 soilHumidityRaw = humiditySensor.value
