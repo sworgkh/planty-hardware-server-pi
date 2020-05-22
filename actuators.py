@@ -14,6 +14,7 @@ import sys
 import logging
 import RPi.GPIO as GPIO
 GPIO.setmode(GPIO.BCM)
+
 MY_ID = "e0221623-fb88-4fbd-b524-6f0092463c93"
 
 process = None
@@ -71,7 +72,7 @@ plantersActionsTable = dynamodb.Table('PlantersActions')
 
 def uvOn():
     global isUVOn
-    GPIO.output(UV_LAMP_PIN, 0)
+    GPIO.output(UV_LAMP_GPIO, 0)
     isUVOn = True
     print("UV On")
     saveActionToDb('UV_LAMP', 'ON')
@@ -79,23 +80,47 @@ def uvOn():
 
 def uvOff():
     global isUVOn
-    GPIO.output(UV_LAMP_PIN, 1)
+    GPIO.output(UV_LAMP_GPIO, 1)
     isUVOn = False
     print("UV Off")
     saveActionToDb('UV_LAMP', 'OFF')
 
 
+def heaterOn():
+    GPIO.output(HEATER_CONTROL_GPIO, 0)
+    print("HEATER On")
+    saveActionToDb('HEATER', 'ON')
+
+
+def heaterOff():
+    GPIO.output(HEATER_CONTROL_GPIO, 0)
+    print("HEATER On")
+    saveActionToDb('HEATER', 'OFF')
+
+
+def fanOn():
+    GPIO.output(FAN_CONTROL_GPIO, 0)
+    print("FAN On")
+    saveActionToDb('FAN', 'ON')
+
+
+def fanOff():
+    GPIO.output(FAN_CONTROL_GPIO, 1)
+    print("FAN Off")
+    saveActionToDb('FAN', 'OFF')
+
+
 def addWater():
     print("Adding Water")
-    GPIO.output(WATER_CONTROL_PIN, 0)
-    time.sleep(10)
-    GPIO.output(WATER_CONTROL_PIN, 1)
+    GPIO.output(WATER_CONTROL_GPIO, 0)
+    time.sleep(30)
+    GPIO.output(WATER_CONTROL_GPIO, 1)
     saveActionToDb('WATER', 'ADD')
 
 
 def moveCameraLeft():
     print('move_left Camera')
-    for i in range(100):
+    for i in range(200):
         for halfstep in range(8):
             for pin in range(4):
                 GPIO.output(camera_motor_pins[pin],
@@ -106,7 +131,7 @@ def moveCameraLeft():
 
 def moveCameraRight():
     print('move_right Camera')
-    for i in range(100):
+    for i in range(200):
         for halfstep in range(8):
             for pin in range(4):
                 GPIO.output(camera_motor_pins[pin],
@@ -212,7 +237,7 @@ def getNeededHumid():
 def on_message(message):
     global MY_ID
     global isUVOn
-    global UV_LAMP_PIN
+    global UV_LAMP_GPIO
     command = (str)(message).split(";")
     print(f'<<< {command[2]}')
     if command[0] == "FROM_PLANTER" or command[1] != MY_ID:
@@ -287,8 +312,8 @@ if __name__ == "__main__":
             retryCounter = retryCounter+1
         except:
             print("Unexpected error:", sys.exc_info()[0])
-            raise
-        finally:
             GPIO.cleanup()
+            raise
+           
 
     GPIO.cleanup()
