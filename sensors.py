@@ -90,9 +90,11 @@ async def websocket_handler():
     uri = "wss://0xl08k0h22.execute-api.eu-west-1.amazonaws.com/dev"
     global soilHumidity
     global saveLaps
+    global retryCounter
 
     async with websockets.connect(uri, ssl=True) as websocket:
         print("Connected to Websocket")
+        retryCounter = 0
         with busio.I2C(board.SCL, board.SDA) as i2c:
             try:
                 uv = VEML6070(i2c, "VEML6070_4_T")
@@ -145,12 +147,12 @@ if __name__ == "__main__":
         try:
             asyncio.get_event_loop().run_until_complete(websocket_handler())
         except websockets.exceptions.ConnectionClosedOK:
-            print("Connection closed by server.\n Reconnecting.\n")
+            print(f"Connection closed by server.\n Reconnecting. Attempt:{retryCounter}\n")
             time.sleep(15)
             retryCounter = retryCounter+1
 
         except websockets.exceptions.ConnectionClosedError:
-            print("Connection closed by server error.\n Reconnecting.\n")
+            print(f"Connection closed by server Error.\n Reconnecting. Attempt:{retryCounter}\n")
             time.sleep(15)
             retryCounter = retryCounter+1
         except Exception as e:

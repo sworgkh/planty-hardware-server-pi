@@ -15,6 +15,7 @@ from dynamodb_json import json_util as dynamo_json
 import logging
 import RPi.GPIO as GPIO
 
+retryCounter = 0
 
 GPIO.setmode(GPIO.BCM)
 
@@ -140,6 +141,11 @@ def fanOff():
 
 
 def addWater(secconds=10):
+    subPhase = getSubPhase()
+    if measurements["soilHumidity"]>=subPhase["soilHumidity"]["max"]:
+        print("Attempt To Over Humidify Soil Blocked.")
+        return
+
     global waterAddedTime
     print("Adding Water")
     GPIO.output(WATER_CONTROL_GPIO, 0)
@@ -368,9 +374,11 @@ def applyGrowthPlan():
 
 
 async def websocket_handler():
+    global retryCounter
     uri = "wss://0xl08k0h22.execute-api.eu-west-1.amazonaws.com/dev"
     async with websockets.connect(uri, ssl=True) as websocket:
         log("Connected to Websocket\n")
+        retryCounter = 0
         while True:
             message = await websocket.recv()
             semicolonCount = sum(map(lambda x: 1 if ';' in x else 0, message))
@@ -392,7 +400,6 @@ async def websocket_handler():
 
 
 if __name__ == "__main__":
-    retryCounter = 0
     load_growth_plan()
     while True and retryCounter < 20:
         try:
