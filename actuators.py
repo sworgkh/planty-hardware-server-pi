@@ -291,7 +291,6 @@ def on_message(message):
     if command[0] == "FROM_PLANTER":
         if command[2] == "MEASUREMENTS":
             setMeasurements(command)
-
         return "Ignore"
 
     if command[2] == "PING":
@@ -384,7 +383,7 @@ async def websocket_handler():
             result = on_message(message)
             applyGrowthPlan()
             if result == "Ignore":
-                log('Ignore')
+                #log('Ignore')
                 continue
 
             answer = f'{{\"action":"message","message":"FROM_PLANTER;e0221623-fb88-4fbd-b524-6f0092463c93;{result}"}}'
