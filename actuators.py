@@ -4,20 +4,25 @@ import websockets
 import pathlib
 import ssl
 import time
-import datetime
+from datetime import datetime, timedelta
 import subprocess
 import boto3
 import json
 import decimal
 import sys
-
+import psutil
+from dynamodb_json import json_util as dynamo_json
 import logging
 import RPi.GPIO as GPIO
+
+
 GPIO.setmode(GPIO.BCM)
 
 MY_ID = "e0221623-fb88-4fbd-b524-6f0092463c93"
+STREAM_PROCCESS_NAME = "kinesis_video_g"
 
 process = None
+
 logger = logging.getLogger('websockets')
 logger.setLevel(logging.INFO)
 logger.addHandler(logging.StreamHandler())
@@ -69,6 +74,30 @@ dynamodb = boto3.resource('dynamodb', region_name='eu-west-1',
                           endpoint_url="https://dynamodb.eu-west-1.amazonaws.com")
 plantersActionsTable = dynamodb.Table('PlantersActions')
 
+waterAddedTime = datetime(2000, 1, 1)
+measurements = {
+    "isInitiated": False,
+    "timeStamp": datetime.utcnow(),
+    "uvIntensity": 0,
+    "soilHumidity": 0,
+    "ambientTemperature": 0,
+    "airHumidity": 0
+}
+
+
+def log(text):
+    print(f'{datetime.now()} {text}')
+
+
+def checkIfProcessRunning(processName):
+    for proc in psutil.process_iter():
+        try:
+            if processName.lower() in proc.name().lower():
+                return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+    return False
+
 
 def uvOn():
     global isUVOn
@@ -110,41 +139,45 @@ def fanOff():
     saveActionToDb('FAN', 'OFF')
 
 
-def addWater():
+def addWater(secconds=10):
+    global waterAddedTime
     print("Adding Water")
     GPIO.output(WATER_CONTROL_GPIO, 0)
-    time.sleep(30)
+    time.sleep(secconds)
     GPIO.output(WATER_CONTROL_GPIO, 1)
+    waterAddedTime = datetime.utcnow()
     saveActionToDb('WATER', 'ADD')
 
 
-def moveCameraLeft():
-    print('move_left Camera')
-    for i in range(200):
+def moveCameraLeft(isLong):
+    print(f'move_left Camera {"Long" if isLong else "Short"}')
+    steps = 600 if isLong else 200
+    for _ in range(steps):
         for halfstep in range(8):
             for pin in range(4):
                 GPIO.output(camera_motor_pins[pin],
                             halfstep_seq_left[halfstep][pin])
             time.sleep(0.001)
-    saveActionToDb('MOVE_CAMERA', 'LEFT')
+    saveActionToDb(f'MOVE_CAMERA_{"LONG" if isLong else "SHORT"}', 'LEFT')
 
 
-def moveCameraRight():
-    print('move_right Camera')
-    for i in range(200):
+def moveCameraRight(isLong):
+    print(f'move_right Camera {"Long" if isLong else "Short"}')
+    steps = 600 if isLong else 200
+    for _ in range(steps):
         for halfstep in range(8):
             for pin in range(4):
                 GPIO.output(camera_motor_pins[pin],
                             halfstep_seq_right[halfstep][pin])
             time.sleep(0.001)
-    saveActionToDb('MOVE_CAMERA', 'RIGHT')
+    saveActionToDb(f'MOVE_CAMERA_{"LONG" if isLong else "SHORT"}', 'RIGHT')
 
 
-def cameraMove(direction):
+def cameraMove(direction, isLong):
     if direction == "R":
-        moveCameraRight()
+        moveCameraRight(isLong)
     elif direction == "L":
-        moveCameraLeft()
+        moveCameraLeft(isLong)
     else:
         print("Bad Camera Direction: {0}".format(direction))
 
@@ -165,7 +198,7 @@ def videoStreamOff():
 
 
 def saveActionToDb(actionType, actionValue):
-    timeStamp = decimal.Decimal(datetime.datetime.utcnow().timestamp())
+    timeStamp = decimal.Decimal(datetime.utcnow().timestamp())
     response = plantersActionsTable.put_item(
         Item={
             'planterId': MY_ID,
@@ -180,10 +213,12 @@ def saveActionToDb(actionType, actionValue):
     else:
         print(f"Failed To Save {actionType}_{actionValue}")
 
+
 def load_growth_plan():
     client = boto3.client('dynamodb')
     try:
-        response = client.get_item(TableName='Test_Planters', Key={'UUID': {'S': str(MY_ID)}})
+        response = client.get_item(TableName='Test_Planters', Key={
+                                   'UUID': {'S': str(MY_ID)}})
         r = dynamo_json.loads(response)
 
         global GROWTH_PLAN
@@ -198,7 +233,7 @@ def load_growth_plan():
         # phases = r['Item']['activeGrowthPlan']['phases']
         # for phase in phases:
         #     if int(phase['fromDay']) <= needed_day < int(phase['toDay']):
-                # print(phase)
+        # print(phase)
 
     except Exception:
         print('Error loading growth plan')
@@ -213,7 +248,7 @@ def getSubPhase():
     phases = GROWTH_PLAN['Item']['activeGrowthPlan']['phases']
     for phase in phases:
         if int(phase['fromDay']) <= needed_day < int(phase['toDay']):
-            now = datetime.datetime.now()
+            now = datetime.now()
             for subphase in phase['subPhases']:
                 if int(subphase['fromHour']) <= now.hour < int(subphase['toHour']):
                     return subphase
@@ -234,86 +269,147 @@ def getNeededHumid():
     return subphase['soilHumidity']['min'], subphase['soilHumidity']['max']
 
 
+def setMeasurements(command):
+    measurements["timeStamp"] = datetime.utcnow()
+    measurements["ambientTemperature"] = (float)((command[3]).split(":")[1])
+    measurements["uvIntensity"] = (int)((command[4]).split(":")[1])
+    measurements["soilHumidity"] = (float)((command[5]).split(":")[1])
+    measurements["airHumidity"] = (float)((command[6]).split(":")[1])
+    measurements["isInitiated"] = True
+
+
 def on_message(message):
-    global MY_ID
+    global MY_ID, STREAM_PROCCESS_NAME
     global isUVOn
     global UV_LAMP_GPIO
     command = (str)(message).split(";")
-    print(f'<<< {command[2]}')
-    if command[0] == "FROM_PLANTER" or command[1] != MY_ID:
+    log(f'{command[2]} <<< {command[0]}')
+    # print(command)
+    if command[1] != MY_ID:
         return "Ignore"
+
+    if command[0] == "FROM_PLANTER":
+        if command[2] == "MEASUREMENTS":
+            setMeasurements(command)
+
+        return "Ignore"
+
+    if command[2] == "PING":
+        return "PONG"
 
     if command[2] == "UV_LAMP_ON" and not isUVOn:
         uvOn()
         return "UV_LAMP_IS_ON"
 
-    elif command[2] == "UV_LAMP_OFF" and isUVOn:
+    if command[2] == "UV_LAMP_OFF" and isUVOn:
         uvOff()
         return "UV_LAMP_IS_OFF"
 
-    elif command[2] == "ADD_WATER":
+    if command[2] == "ADD_WATER":
         addWater()
         return "WATER_ADDED"
 
-    elif command[2] == "MOVE_CAMERA_RIGHT":
-        cameraMove("R")
+    if command[2] == "MOVE_CAMERA_RIGHT":
+        cameraMove("R", False)
         return "CAMERA_MOVED_RIGHT"
 
-    elif command[2] == "MOVE_CAMERA_LEFT":
-        cameraMove("L")
+    if command[2] == "MOVE_CAMERA_LEFT":
+        cameraMove("L", False)
         return "CAMERA_MOVED_LEFT"
 
-    elif command[2] == "VIDEO_STREAM_ON":
+    if command[2] == "MOVE_CAMERA_RIGHT_LONG":
+        cameraMove("R", True)
+        return "CAMERA_MOVED_RIGHT_LONG"
+
+    if command[2] == "MOVE_CAMERA_LEFT_LONG":
+        cameraMove("L", True)
+        return "CAMERA_MOVED_LEFT_LONG"
+
+    if command[2] == "VIDEO_STREAM_ON":
         videoStreamOn()
         return "STREAM_STARTED"
 
-    elif command[2] == "VIDEO_STREAM_OFF":
+    if command[2] == "VIDEO_STREAM_OFF":
         videoStreamOff()
         return "STREAM_STOPPED"
 
-    else:
-        print("Unknown Command: {0}".format(command))
-        return "FAILED"
+    if command[2] == "VIDEO_STREAM_STATUS":
+        return "STREAM_ON" if checkIfProcessRunning(STREAM_PROCCESS_NAME) else "STREAM_OFF"
+
+    if command[2] == "UV_LAMP_STATUS":
+        return "LAMP_IS_ON" if isUVOn else "LAMP_IS_OFF"
+
+    if command[2] == "RELOAD_GROWTH_PLAN":
+        load_growth_plan()
+        return "GROWTH_PLAN_RELOADED"
+
+    log("Unknown Command: {0}".format(command))
+    return "FAILED"
+
+
+def waterAddedSeccondsAgo():
+    global waterAddedTime
+    now = datetime.utcnow()
+    return now - waterAddedTime
+
+
+def handleGrowthPlantSoilHumidity(subPhase):
+    hNow = measurements["soilHumidity"]
+    hMin = subPhase["soilHumidity"]["min"]
+    print(f'Soil Humidity Check now: {hNow:0.3f} | min: {hMin:0.3f}')
+    if hNow < hMin:
+        if waterAddedSeccondsAgo().total_seconds() > 5*60:
+            addWater(20)
+
+
+def applyGrowthPlan():
+    if measurements["isInitiated"]:
+        subPhase = getSubPhase()
+        handleGrowthPlantSoilHumidity(subPhase)
 
 
 async def websocket_handler():
     uri = "wss://0xl08k0h22.execute-api.eu-west-1.amazonaws.com/dev"
     async with websockets.connect(uri, ssl=True) as websocket:
-        print("Connected to Websocket\n")
+        log("Connected to Websocket\n")
         while True:
             message = await websocket.recv()
             semicolonCount = sum(map(lambda x: 1 if ';' in x else 0, message))
-            if semicolonCount != 2 and semicolonCount != 5:
-                print(message)
-                print("Bad Command")
+            if semicolonCount != 2 and semicolonCount != 5 and semicolonCount != 6:
+                log(message)
+                log("Bad Command")
                 answer = '{{\"action":"message","message":"FROM_PLANTER;e0221623-fb88-4fbd-b524-6f0092463c93;BAD_COMMAND"}}'
                 await websocket.send(answer)
                 continue
             result = on_message(message)
+            applyGrowthPlan()
             if result == "Ignore":
-                print('Ignore')
+                log('Ignore')
                 continue
 
             answer = f'{{\"action":"message","message":"FROM_PLANTER;e0221623-fb88-4fbd-b524-6f0092463c93;{result}"}}'
             await websocket.send(answer)
-            print(f'>>> {result}')
+            log(f'>>> {result}')
 
 
 if __name__ == "__main__":
     retryCounter = 0
-
+    load_growth_plan()
     while True and retryCounter < 20:
         try:
             asyncio.get_event_loop().run_until_complete(websocket_handler())
         except websockets.exceptions.ConnectionClosedOK:
-            print("Connection closed by server.\n Reconnecting.\n")
+            log("Connection closed by server.\n Reconnecting.\n")
+            time.sleep(15)
+            retryCounter = retryCounter+1
+
         except websockets.exceptions.ConnectionClosedError:
-            print("Connection closed by server error.\n Reconnecting.\n")
+            log("Connection closed by server error.\n Reconnecting.\n")
+            time.sleep(15)
             retryCounter = retryCounter+1
         except:
             print("Unexpected error:", sys.exc_info()[0])
             GPIO.cleanup()
             raise
-           
 
     GPIO.cleanup()
