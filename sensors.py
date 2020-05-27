@@ -1,4 +1,3 @@
-import plantyErrors
 import collections
 import asyncio
 import websockets
