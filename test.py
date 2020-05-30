@@ -1,4 +1,3 @@
-import plantyErrors
 import asyncio
 import websockets
 import time
@@ -10,6 +9,7 @@ import logging
 logger = logging.getLogger('websockets')
 logger.setLevel(logging.DEBUG)
 logger.addHandler(logging.StreamHandler())
+logging.basicConfig(filename='test.log',level=logging.DEBUG)
 
 
 async def websocket_handler():
@@ -28,14 +28,17 @@ async def websocket_handler():
 
 
 if __name__ == "__main__":
-    while True:
-        try:
-            asyncio.get_event_loop().run_until_complete(websocket_handler())
-        except websockets.exceptions.ConnectionClosedOK:
-            print("Connection closed by server.\n Reconnecting.\n")
-        except websockets.exceptions.ConnectionClosedError:
-            print("Connection closed by server error.\n Reconnecting.\n")
-        except Exception as e:
-            print("Unexpected error:", sys.exc_info()[0])
-            print(e)
-            raise
+    logging.debug('Debug')
+    logging.info('Info')
+    logging.warning('Warning')
+    # while True:
+    #     try:
+    #         asyncio.get_event_loop().run_until_complete(websocket_handler())
+    #     except websockets.exceptions.ConnectionClosedOK:
+    #         print("Connection closed by server.\n Reconnecting.\n")
+    #     except websockets.exceptions.ConnectionClosedError:
+    #         print("Connection closed by server error.\n Reconnecting.\n")
+    #     except Exception as e:
+    #         print("Unexpected error:", sys.exc_info()[0])
+    #         print(e)
+    #         raise

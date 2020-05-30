@@ -14,6 +14,11 @@ import psutil
 from dynamodb_json import json_util as dynamo_json
 import logging
 import RPi.GPIO as GPIO
+import logging.config
+
+logging.config.fileConfig('logging.conf')
+# create logger
+logger = logging.getLogger('actuators')
 
 retryCounter = 0
 
@@ -23,10 +28,6 @@ MY_ID = "e0221623-fb88-4fbd-b524-6f0092463c93"
 STREAM_PROCCESS_NAME = "kinesis_video_g"
 
 process = None
-
-logger = logging.getLogger('websockets')
-logger.setLevel(logging.INFO)
-logger.addHandler(logging.StreamHandler())
 
 camera_motor_pins = [4, 17, 27, 22]
 
@@ -85,11 +86,6 @@ measurements = {
     "airHumidity": 0
 }
 
-
-def log(text):
-    print(f'{datetime.now()} {text}')
-
-
 def checkIfProcessRunning(processName):
     for proc in psutil.process_iter():
         try:
@@ -104,7 +100,7 @@ def uvOn():
     global isUVOn
     GPIO.output(UV_LAMP_GPIO, 0)
     isUVOn = True
-    print("UV On")
+    logger.info("UV On")
     saveActionToDb('UV_LAMP', 'ON')
 
 
@@ -112,42 +108,42 @@ def uvOff():
     global isUVOn
     GPIO.output(UV_LAMP_GPIO, 1)
     isUVOn = False
-    print("UV Off")
+    logger.info("UV Off")
     saveActionToDb('UV_LAMP', 'OFF')
 
 
 def heaterOn():
     GPIO.output(HEATER_CONTROL_GPIO, 0)
-    print("HEATER On")
+    logger.info("HEATER On")
     saveActionToDb('HEATER', 'ON')
 
 
 def heaterOff():
     GPIO.output(HEATER_CONTROL_GPIO, 0)
-    print("HEATER On")
+    logger.info("HEATER On")
     saveActionToDb('HEATER', 'OFF')
 
 
 def fanOn():
     GPIO.output(FAN_CONTROL_GPIO, 0)
-    print("FAN On")
+    logger.info("FAN On")
     saveActionToDb('FAN', 'ON')
 
 
 def fanOff():
     GPIO.output(FAN_CONTROL_GPIO, 1)
-    print("FAN Off")
+    logger.info("FAN Off")
     saveActionToDb('FAN', 'OFF')
 
 
 def addWater(secconds=10):
     subPhase = getSubPhase()
-    if measurements["soilHumidity"]>=subPhase["soilHumidity"]["max"]:
-        print("Attempt To Over Humidify Soil Blocked.")
+    if measurements["soilHumidity"] >= subPhase["soilHumidity"]["max"]:
+        logger.error("Attempt To Over Humidify Soil Blocked.")
         return
 
     global waterAddedTime
-    print("Adding Water")
+    logger.info("Adding Water")
     GPIO.output(WATER_CONTROL_GPIO, 0)
     time.sleep(secconds)
     GPIO.output(WATER_CONTROL_GPIO, 1)
@@ -289,8 +285,7 @@ def on_message(message):
     global isUVOn
     global UV_LAMP_GPIO
     command = (str)(message).split(";")
-    log(f'{command[2]} <<< {command[0]}')
-    # print(command)
+    logger.info(f'{command[2]} <<< {command[0]}')
     if command[1] != MY_ID:
         return "Ignore"
 
@@ -348,7 +343,7 @@ def on_message(message):
         load_growth_plan()
         return "GROWTH_PLAN_RELOADED"
 
-    log("Unknown Command: {0}".format(command))
+    logger.info(f"Unknown Command: {command}")
     return "FAILED"
 
 
@@ -359,11 +354,15 @@ def waterAddedSeccondsAgo():
 
 
 def handleGrowthPlantSoilHumidity(subPhase):
+    if(subPhase == None or subPhase["soilHumidity"] == None or subPhase["soilHumidity"]["min"] == None):
+        logger.error("Failed To read Subphase values. Skipping Humidity check.")
+        return
+
     hNow = measurements["soilHumidity"]
     hMin = subPhase["soilHumidity"]["min"]
-    print(f'Soil Humidity Check now: {hNow:0.3f} | min: {hMin:0.3f}')
+    logger.info(f'Soil Humidity Check [ now: {hNow:0.3f} | min: {hMin:0.3f} ]')
     if hNow < hMin:
-        if waterAddedSeccondsAgo().total_seconds() > 5*60:
+        if waterAddedSeccondsAgo().total_seconds() > 7*60:
             addWater(20)
 
 
@@ -377,44 +376,44 @@ async def websocket_handler():
     global retryCounter
     uri = "wss://0xl08k0h22.execute-api.eu-west-1.amazonaws.com/dev"
     async with websockets.connect(uri, ssl=True) as websocket:
-        log("Connected to Websocket\n")
+        logger.info("Connected to Websocket")
         retryCounter = 0
         while True:
             message = await websocket.recv()
             semicolonCount = sum(map(lambda x: 1 if ';' in x else 0, message))
             if semicolonCount != 2 and semicolonCount != 5 and semicolonCount != 6:
-                log(message)
-                log("Bad Command")
+                logger.warning("Bad Command")
+                logger.warning(message)
                 answer = '{{\"action":"message","message":"FROM_PLANTER;e0221623-fb88-4fbd-b524-6f0092463c93;BAD_COMMAND"}}'
                 await websocket.send(answer)
                 continue
             result = on_message(message)
             applyGrowthPlan()
             if result == "Ignore":
-                #log('Ignore')
                 continue
 
             answer = f'{{\"action":"message","message":"FROM_PLANTER;e0221623-fb88-4fbd-b524-6f0092463c93;{result}"}}'
             await websocket.send(answer)
-            log(f'>>> {result}')
+            logging.info(f'>>> {result}')
 
 
 if __name__ == "__main__":
+    logger.info('Actuators Started!')
     load_growth_plan()
     while True and retryCounter < 20:
         try:
             asyncio.get_event_loop().run_until_complete(websocket_handler())
         except websockets.exceptions.ConnectionClosedOK:
-            log("Connection closed by server.\n Reconnecting.\n")
+            logger.warning(f"Connection closed by server.Reconnecting. Retry:{retryCounter}")
             time.sleep(15)
             retryCounter = retryCounter+1
 
         except websockets.exceptions.ConnectionClosedError:
-            log("Connection closed by server error.\n Reconnecting.\n")
+            logger.warning(f"Connection closed by server error. Reconnecting. Retry:{retryCounter}")
             time.sleep(15)
             retryCounter = retryCounter+1
         except:
-            print("Unexpected error:", sys.exc_info()[0])
+            logger.critical("Unexpected error:", sys.exc_info()[0])
             GPIO.cleanup()
             raise
 
