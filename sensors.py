@@ -152,17 +152,17 @@ if __name__ == "__main__":
         try:
             asyncio.get_event_loop().run_until_complete(websocket_handler())
         except websockets.exceptions.ConnectionClosedOK:
-            logger.warning(f"Connection closed by server.\n Reconnecting. Attempt:{retryCounter}\n")
+            logger.warning(f"Connection closed by server. Reconnecting. Attempt:{retryCounter}\n")
             time.sleep(15)
             retryCounter = retryCounter+1
 
         except websockets.exceptions.ConnectionClosedError:
-            logger.warning(f"Connection closed by server Error.\n Reconnecting. Attempt:{retryCounter}\n")
+            logger.warning(f"Connection closed by server Error. Reconnecting. Attempt:{retryCounter}\n")
             time.sleep(15)
             retryCounter = retryCounter+1
         except Exception as e:
-            logger.critical("Unexpected error:", sys.exc_info()[0])
-            logger.critical(e)
+            logger.critical(sys.exc_info()[0])
+            logger.critical(e.msg)
             GPIO.cleanup()
             raise
         GPIO.cleanup()

@@ -4,9 +4,10 @@ import websockets
 import pathlib
 import ssl
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import subprocess
 import boto3
+from boto3.dynamodb.conditions import Key
 import json
 import decimal
 import sys
@@ -15,6 +16,7 @@ from dynamodb_json import json_util as dynamo_json
 import logging
 import RPi.GPIO as GPIO
 import logging.config
+import statistics
 
 logging.config.fileConfig('logging.conf')
 # create logger
@@ -77,6 +79,12 @@ dynamodb = boto3.resource('dynamodb', region_name='eu-west-1',
 plantersActionsTable = dynamodb.Table('PlantersActions')
 
 waterAddedTime = datetime(2000, 1, 1)
+activeSubPhase = {
+    "subPhase": {"name": ""},
+    "startTimeStamp": datetime(2000, 1, 1),
+    "uvValues": []
+
+}
 measurements = {
     "isInitiated": False,
     "timeStamp": datetime.utcnow(),
@@ -85,6 +93,7 @@ measurements = {
     "ambientTemperature": 0,
     "airHumidity": 0
 }
+
 
 def checkIfProcessRunning(processName):
     for proc in psutil.process_iter():
@@ -243,38 +252,62 @@ def load_growth_plan():
 
 def getSubPhase():
     time_activated = GROWTH_PLAN['Item']['TimeActivated']
-    current_time = time.time()
+    current_time = datetime.utcnow().timestamp()
     current_time = str(current_time)
     needed_day = float(current_time) - float(time_activated)
     needed_day = int(needed_day / 86400)
     phases = GROWTH_PLAN['Item']['activeGrowthPlan']['phases']
     for phase in phases:
         if int(phase['fromDay']) <= needed_day < int(phase['toDay']):
-            now = datetime.now()
+            now = datetime.utcnow()
             for subphase in phase['subPhases']:
                 if int(subphase['fromHour']) <= now.hour < int(subphase['toHour']):
                     return subphase
 
 
-def getNeededTemp():
-    subphase = getSubPhase()
-    return subphase['temperature']['min'], subphase['temperature']['max']
+# def getNeededTemp():
+#     subphase = getSubPhase()
+#     return subphase['temperature']['min'], subphase['temperature']['max']
 
 
-def getNeededUV():
-    subphase = getSubPhase()
-    return subphase['uvIntensity']['min'], subphase['uvIntensity']['max']
+# def getNeededUV():
+#     subphase = getSubPhase()
+#     return subphase['uvIntensity']['min'], subphase['uvIntensity']['max']
 
 
-def getNeededHumid():
-    subphase = getSubPhase()
-    return subphase['soilHumidity']['min'], subphase['soilHumidity']['max']
+# def getNeededHumid():
+#     subphase = getSubPhase()
+#     return subphase['soilHumidity']['min'], subphase['soilHumidity']['max']
+
+def getMeasurementsForCurrentSubphase(subPhase):
+    table = dynamodb.Table('PlantersMeasurements')
+
+    utcNow = datetime.utcnow()
+    now = decimal.Decimal(utcNow.timestamp())
+    subPhaseStart = decimal.Decimal(
+        datetime(utcNow.year, utcNow.month, utcNow.day,
+                 subPhase["fromHour"], 0, 0,tzinfo=timezone.utc).timestamp()
+    )
+
+    try:
+        response = table.query(KeyConditionExpression=Key('planterId').eq(
+            MY_ID) & Key('timeStamp').between(subPhaseStart, now))
+
+        items = response["Items"]
+        for m in items:
+            activeSubPhase["uvValues"].append(m["uvIntesity"])
+        logger.info("Loaded UV values for Current Phase")
+
+    except:
+        logger.critical("Failed to load SubPhase Measurements till now")
+        raise
 
 
 def setMeasurements(command):
     measurements["timeStamp"] = datetime.utcnow()
     measurements["ambientTemperature"] = (float)((command[3]).split(":")[1])
     measurements["uvIntensity"] = (int)((command[4]).split(":")[1])
+    activeSubPhase["uvValues"].append(measurements["uvIntensity"])
     measurements["soilHumidity"] = (float)((command[5]).split(":")[1])
     measurements["airHumidity"] = (float)((command[6]).split(":")[1])
     measurements["isInitiated"] = True
@@ -354,8 +387,9 @@ def waterAddedSeccondsAgo():
 
 
 def handleGrowthPlantSoilHumidity(subPhase):
-    if(subPhase == None or subPhase["soilHumidity"] == None or subPhase["soilHumidity"]["min"] == None):
-        logger.error("Failed To read Subphase values. Skipping Humidity check.")
+    if(subPhase["soilHumidity"] == None or subPhase["soilHumidity"]["min"] == None):
+        logger.error(
+            "Failed To read Subphase Soil Humidity values. Skipping Soil Humidity check.")
         return
 
     hNow = measurements["soilHumidity"]
@@ -366,10 +400,34 @@ def handleGrowthPlantSoilHumidity(subPhase):
             addWater(20)
 
 
+def handleGrowthPlantUvAverage(subPhase):
+    if(subPhase["uvIntensity"] == None or subPhase["uvIntensity"]["min"] == None):
+        logger.error("Failed To read Subphase UV values. Skipping UV check.")
+        return
+
+    uvAvgNow = statistics.mean(activeSubPhase["uvValues"])
+    uvNow = measurements["uvIntensity"]
+    uvMin = subPhase["uvIntensity"]["min"]
+    logger.info(
+        f'UV Check [ now: {uvNow:0} | mean {uvAvgNow:0.3f} | min: {uvMin:0} ]')
+
+    if uvAvgNow <= uvMin and uvNow <= uvMin and not isUVOn:
+        uvOn()
+    elif isUVOn:
+        uvOff()
+
+
 def applyGrowthPlan():
     if measurements["isInitiated"]:
         subPhase = getSubPhase()
+        if(subPhase == None):
+            logger.error("Failed To read Subphase values. Skipping check.")
+            return
+        if(activeSubPhase["subPhase"]["name"] != subPhase["name"]):
+            activeSubPhase["subPhase"] = subPhase
+
         handleGrowthPlantSoilHumidity(subPhase)
+        handleGrowthPlantUvAverage(subPhase)
 
 
 async def websocket_handler():
@@ -400,20 +458,25 @@ async def websocket_handler():
 if __name__ == "__main__":
     logger.info('Actuators Started!')
     load_growth_plan()
+    activeSubPhase["subPhase"] = getSubPhase()
+    getMeasurementsForCurrentSubphase(activeSubPhase["subPhase"])
+
     while True and retryCounter < 20:
         try:
             asyncio.get_event_loop().run_until_complete(websocket_handler())
         except websockets.exceptions.ConnectionClosedOK:
-            logger.warning(f"Connection closed by server.Reconnecting. Retry:{retryCounter}")
+            logger.warning(
+                f"Connection closed by server.Reconnecting. Retry:{retryCounter}")
             time.sleep(15)
             retryCounter = retryCounter+1
 
         except websockets.exceptions.ConnectionClosedError:
-            logger.warning(f"Connection closed by server error. Reconnecting. Retry:{retryCounter}")
+            logger.warning(
+                f"Connection closed by server error. Reconnecting. Retry:{retryCounter}")
             time.sleep(15)
             retryCounter = retryCounter+1
         except:
-            logger.critical("Unexpected error:", sys.exc_info()[0])
+            logger.critical(sys.exc_info()[0])
             GPIO.cleanup()
             raise
 
