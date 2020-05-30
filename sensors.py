@@ -20,14 +20,20 @@ import RPi.GPIO as GPIO
 import itertools
 
 import logging
+import logging.config
+
+logging.config.fileConfig('logging.conf')
+# create logger
+logger = logging.getLogger('sensors')
+
 
 dynamodb = boto3.resource('dynamodb', region_name='eu-west-1',
                           endpoint_url="https://dynamodb.eu-west-1.amazonaws.com")
 plantersMeasurementsTable = dynamodb.Table('PlantersMeasurements')
 
-logger = logging.getLogger('websockets')
-logger.setLevel(logging.INFO)
-logger.addHandler(logging.StreamHandler())
+# logger = logging.getLogger('websockets')
+# logger.setLevel(logging.INFO)
+# logger.addHandler(logging.StreamHandler())
 
 MY_ID = "e0221623-fb88-4fbd-b524-6f0092463c93"
 
@@ -77,12 +83,12 @@ def saveMeasurementsToDb(ambientTemperatureCelsius, uvIntesity, soilHumidity):
         )
 
         if(response["ResponseMetadata"]["HTTPStatusCode"] == 200):
-            print("Saved To Database.")
+            logger.info("Saved To Database.")
         else:
-            print("Failed To Save")
+            logger.error("Failed To Save to Database")
 
     except:
-        print("Failed To Save")
+        logger.error("Failed To Save")
 
 
 async def websocket_handler():
@@ -92,7 +98,7 @@ async def websocket_handler():
     global retryCounter
 
     async with websockets.connect(uri, ssl=True) as websocket:
-        print("Connected to Websocket")
+        logger.info("Connected to Websocket")
         retryCounter = 0
         with busio.I2C(board.SCL, board.SDA) as i2c:
             try:
@@ -101,7 +107,7 @@ async def websocket_handler():
                 ads = ADS.ADS1115(i2c, mode=ads1x15.Mode.CONTINUOUS)
                 humiditySensor = AnalogIn(ads, ADS.P0)
             except:
-                print(f'Failed to initiate Sensor:\n{sys.exc_info()[0]}')
+                logger.error(f'Failed to initiate Sensor:\n{sys.exc_info()[0]}')
                 raise
                 # TODO Add Sensors exceptions and implement retry
 
@@ -119,14 +125,14 @@ async def websocket_handler():
                 setTemperature(t)
                 airHumidity = bme280.humidity
 
-                print(f'{datetime.datetime.now()} T:{temperature:0.3f}|{t:0.6f} AH:{airHumidity:0.2f} UV:{uv_raw} SH:{soilHumidity:0.3f}|{sh:0.6f}')
+                logger.info(f'{datetime.datetime.now()} T:{temperature:0.3f}|{t:0.6f} AH:{airHumidity:0.2f} UV:{uv_raw} SH:{soilHumidity:0.3f}|{sh:0.6f}')
 
                 if(saveLaps == 0):
                     try:
                         saveMeasurementsToDb(temperature, uv_raw, soilHumidity)
                     except Exception as e:
-                        print("Failed  to save data to DynamoDB.")
-                        print(e)
+                        logger.error("Failed to save data to DynamoDB.")
+                        logger.error(e)
 
                 if(saveLaps % 10 == 0):
                     message = f'{{\"action":"message","message":"FROM_PLANTER;{MY_ID};MEASUREMENTS;T:{temperature};UV:{uv_raw};SH:{soilHumidity};AH:{airHumidity}"}}'
@@ -146,17 +152,17 @@ if __name__ == "__main__":
         try:
             asyncio.get_event_loop().run_until_complete(websocket_handler())
         except websockets.exceptions.ConnectionClosedOK:
-            print(f"Connection closed by server.\n Reconnecting. Attempt:{retryCounter}\n")
+            logger.warning(f"Connection closed by server.\n Reconnecting. Attempt:{retryCounter}\n")
             time.sleep(15)
             retryCounter = retryCounter+1
 
         except websockets.exceptions.ConnectionClosedError:
-            print(f"Connection closed by server Error.\n Reconnecting. Attempt:{retryCounter}\n")
+            logger.warning(f"Connection closed by server Error.\n Reconnecting. Attempt:{retryCounter}\n")
             time.sleep(15)
             retryCounter = retryCounter+1
         except Exception as e:
-            print("Unexpected error:", sys.exc_info()[0])
-            print(e)
+            logger.critical("Unexpected error:", sys.exc_info()[0])
+            logger.critical(e)
             GPIO.cleanup()
             raise
         GPIO.cleanup()
