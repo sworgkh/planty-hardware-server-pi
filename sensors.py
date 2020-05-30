@@ -125,7 +125,7 @@ async def websocket_handler():
                 setTemperature(t)
                 airHumidity = bme280.humidity
 
-                logger.info(f'{datetime.datetime.now()} T:{temperature:0.3f}|{t:0.6f} AH:{airHumidity:0.2f} UV:{uv_raw} SH:{soilHumidity:0.3f}|{sh:0.6f}')
+                logger.info(f'T:{temperature:0.3f}|{t:0.6f} AH:{airHumidity:0.2f} UV:{uv_raw} SH:{soilHumidity:0.3f}|{sh:0.6f}')
 
                 if(saveLaps == 0):
                     try:

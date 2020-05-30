@@ -220,9 +220,9 @@ def saveActionToDb(actionType, actionValue):
     )
 
     if(response["ResponseMetadata"]["HTTPStatusCode"] == 200):
-        print(f"Saved {actionType}_{actionValue} To Database.")
+        logger.info(f"Saved {actionType}_{actionValue} To Database.")
     else:
-        print(f"Failed To Save {actionType}_{actionValue}")
+        logger.error(f"Failed To Save {actionType}_{actionValue}")
 
 
 def load_growth_plan():
@@ -425,6 +425,7 @@ def applyGrowthPlan():
             return
         if(activeSubPhase["subPhase"]["name"] != subPhase["name"]):
             activeSubPhase["subPhase"] = subPhase
+            logger.info(f'Starting "{subPhase["name"]}" Phase.')
 
         handleGrowthPlantSoilHumidity(subPhase)
         handleGrowthPlantUvAverage(subPhase)
@@ -452,13 +453,14 @@ async def websocket_handler():
 
             answer = f'{{\"action":"message","message":"FROM_PLANTER;e0221623-fb88-4fbd-b524-6f0092463c93;{result}"}}'
             await websocket.send(answer)
-            logging.info(f'>>> {result}')
+            logger.info(f'>>> {result}')
 
 
 if __name__ == "__main__":
     logger.info('Actuators Started!')
     load_growth_plan()
     activeSubPhase["subPhase"] = getSubPhase()
+    logger.info(f'Starting "{activeSubPhase["subPhase"]["name"]}" Phase.')
     getMeasurementsForCurrentSubphase(activeSubPhase["subPhase"])
 
     while True and retryCounter < 20:
