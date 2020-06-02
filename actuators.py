@@ -67,12 +67,14 @@ HEATER_CONTROL_GPIO = 23     # PIN 16
 FAN_CONTROL_GPIO = 11        # PIN 23
 
 isUVOn = False
+isHeaterOn = False
+isFanOn = False
 
 # GPIO.setwarnings(False)
 GPIO.setup(UV_LAMP_GPIO, GPIO.OUT, initial=1)
 GPIO.setup(WATER_CONTROL_GPIO, GPIO.OUT, initial=1)
-GPIO.setup(HEATER_CONTROL_GPIO, GPIO.OUT)
-GPIO.setup(FAN_CONTROL_GPIO, GPIO.OUT)
+GPIO.setup(HEATER_CONTROL_GPIO, GPIO.OUT, initial=0)
+GPIO.setup(FAN_CONTROL_GPIO, GPIO.OUT, initial=0)
 
 dynamodb = boto3.resource('dynamodb', region_name='eu-west-1',
                           endpoint_url="https://dynamodb.eu-west-1.amazonaws.com")
@@ -122,25 +124,33 @@ def uvOff():
 
 
 def heaterOn():
-    GPIO.output(HEATER_CONTROL_GPIO, 0)
+    global isHeaterOn
+    GPIO.output(HEATER_CONTROL_GPIO, 1)
+    isHeaterOn = True
     logger.info("HEATER On")
     saveActionToDb('HEATER', 'ON')
 
 
 def heaterOff():
+    global isHeaterOn
     GPIO.output(HEATER_CONTROL_GPIO, 0)
+    isHeaterOn = False
     logger.info("HEATER On")
     saveActionToDb('HEATER', 'OFF')
 
 
 def fanOn():
-    GPIO.output(FAN_CONTROL_GPIO, 0)
+    global isFanOn
+    GPIO.output(FAN_CONTROL_GPIO, 1)
+    isFanOn = True
     logger.info("FAN On")
     saveActionToDb('FAN', 'ON')
 
 
 def fanOff():
-    GPIO.output(FAN_CONTROL_GPIO, 1)
+    global isFanOn
+    GPIO.output(FAN_CONTROL_GPIO, 0)
+    isFanOn = False
     logger.info("FAN Off")
     saveActionToDb('FAN', 'OFF')
 
@@ -261,7 +271,9 @@ def getSubPhase():
         if int(phase['fromDay']) <= needed_day < int(phase['toDay']):
             now = datetime.utcnow()
             for subphase in phase['subPhases']:
-                if int(subphase['fromHour']) <= now.hour < int(subphase['toHour']):
+                fromHour = int(subphase['fromHour']) if int(
+                    subphase['fromHour']) != 24 else int(0)
+                if fromHour <= now.hour < int(subphase['toHour']):
                     return subphase
 
 
@@ -284,9 +296,11 @@ def getMeasurementsForCurrentSubphase(subPhase):
 
     utcNow = datetime.utcnow()
     now = decimal.Decimal(utcNow.timestamp())
+    fromHour = int(subPhase['fromHour']) if int(
+        subPhase['fromHour']) != 24 else int(0)
     subPhaseStart = decimal.Decimal(
         datetime(utcNow.year, utcNow.month, utcNow.day,
-                 subPhase["fromHour"], 0, 0,tzinfo=timezone.utc).timestamp()
+                 fromHour, 0, 0, 0, tzinfo=timezone.utc).timestamp()
     )
 
     try:
@@ -316,6 +330,8 @@ def setMeasurements(command):
 def on_message(message):
     global MY_ID, STREAM_PROCCESS_NAME
     global isUVOn
+    global isHeaterOn
+    global isFanOn
     global UV_LAMP_GPIO
     command = (str)(message).split(";")
     logger.info(f'{command[2]} <<< {command[0]}')
@@ -338,6 +354,22 @@ def on_message(message):
         uvOff()
         return "UV_LAMP_IS_OFF"
 
+    if command[2] == "HEATER_ON" and not isHeaterOn:
+        heaterOn()
+        return "HEATER_IS_ON"
+
+    if command[2] == "HEATER_OFF" and isHeaterOn:
+        heaterOff()
+        return "HEATER_IS_OFF"
+
+    if command[2] == "FAN_ON" and not isFanOn:
+        fanOn()
+        return "FAN_IS_ON"
+
+    if command[2] == "FAN_OFF" and isFanOn:
+        fanOff()
+        return "FAN_IS_OFF"
+
     if command[2] == "ADD_WATER":
         addWater()
         return "WATER_ADDED"
@@ -359,11 +391,13 @@ def on_message(message):
         return "CAMERA_MOVED_LEFT_LONG"
 
     if command[2] == "VIDEO_STREAM_ON":
-        videoStreamOn()
+        if not checkIfProcessRunning(STREAM_PROCCESS_NAME):
+            videoStreamOn()
         return "STREAM_STARTED"
 
     if command[2] == "VIDEO_STREAM_OFF":
-        videoStreamOff()
+        if checkIfProcessRunning(STREAM_PROCCESS_NAME):
+            videoStreamOff()
         return "STREAM_STOPPED"
 
     if command[2] == "VIDEO_STREAM_STATUS":
@@ -371,6 +405,12 @@ def on_message(message):
 
     if command[2] == "UV_LAMP_STATUS":
         return "LAMP_IS_ON" if isUVOn else "LAMP_IS_OFF"
+    
+    if command[2] == "HEATER_STATUS":
+        return "HEATER_IS_ON" if isHeaterOn else "HEATER_IS_OFF"
+    
+    if command[2] == "FAN_STATUS":
+        return "FAN_IS_ON" if isFanOn else "FAN_IS_OFF"
 
     if command[2] == "RELOAD_GROWTH_PLAN":
         load_growth_plan()
@@ -461,7 +501,7 @@ if __name__ == "__main__":
     load_growth_plan()
     activeSubPhase["subPhase"] = getSubPhase()
     logger.info(f'Starting "{activeSubPhase["subPhase"]["name"]}" Phase.')
-    getMeasurementsForCurrentSubphase(activeSubPhase["subPhase"])
+    # getMeasurementsForCurrentSubphase(activeSubPhase["subPhase"])
 
     while True and retryCounter < 20:
         try:
