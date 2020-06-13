@@ -67,14 +67,15 @@ HEATER_CONTROL_GPIO = 23     # PIN 16
 FAN_CONTROL_GPIO = 11        # PIN 23
 
 isUVOn = False
+isManualUVOn = False
 isHeaterOn = False
 isFanOn = False
 
 # GPIO.setwarnings(False)
 GPIO.setup(UV_LAMP_GPIO, GPIO.OUT, initial=1)
 GPIO.setup(WATER_CONTROL_GPIO, GPIO.OUT, initial=1)
-GPIO.setup(HEATER_CONTROL_GPIO, GPIO.OUT, initial=0)
-GPIO.setup(FAN_CONTROL_GPIO, GPIO.OUT, initial=0)
+GPIO.setup(HEATER_CONTROL_GPIO, GPIO.OUT, initial=1)
+GPIO.setup(FAN_CONTROL_GPIO, GPIO.OUT, initial=1)
 
 dynamodb = boto3.resource('dynamodb', region_name='eu-west-1',
                           endpoint_url="https://dynamodb.eu-west-1.amazonaws.com")
@@ -125,7 +126,7 @@ def uvOff():
 
 def heaterOn():
     global isHeaterOn
-    GPIO.output(HEATER_CONTROL_GPIO, 1)
+    GPIO.output(HEATER_CONTROL_GPIO, 0)
     isHeaterOn = True
     logger.info("HEATER On")
     saveActionToDb('HEATER', 'ON')
@@ -133,7 +134,7 @@ def heaterOn():
 
 def heaterOff():
     global isHeaterOn
-    GPIO.output(HEATER_CONTROL_GPIO, 0)
+    GPIO.output(HEATER_CONTROL_GPIO, 1)
     isHeaterOn = False
     logger.info("HEATER On")
     saveActionToDb('HEATER', 'OFF')
@@ -141,7 +142,7 @@ def heaterOff():
 
 def fanOn():
     global isFanOn
-    GPIO.output(FAN_CONTROL_GPIO, 1)
+    GPIO.output(FAN_CONTROL_GPIO, 0)
     isFanOn = True
     logger.info("FAN On")
     saveActionToDb('FAN', 'ON')
@@ -149,7 +150,7 @@ def fanOn():
 
 def fanOff():
     global isFanOn
-    GPIO.output(FAN_CONTROL_GPIO, 0)
+    GPIO.output(FAN_CONTROL_GPIO, 1)
     isFanOn = False
     logger.info("FAN Off")
     saveActionToDb('FAN', 'OFF')
@@ -171,7 +172,7 @@ def addWater(secconds=10):
 
 
 def moveCameraLeft(isLong):
-    print(f'move_left Camera {"Long" if isLong else "Short"}')
+    logger.info(f'move_left Camera {"Long" if isLong else "Short"}')
     steps = 600 if isLong else 200
     for _ in range(steps):
         for halfstep in range(8):
@@ -183,7 +184,7 @@ def moveCameraLeft(isLong):
 
 
 def moveCameraRight(isLong):
-    print(f'move_right Camera {"Long" if isLong else "Short"}')
+    logger.info(f'move_right Camera {"Long" if isLong else "Short"}')
     steps = 600 if isLong else 200
     for _ in range(steps):
         for halfstep in range(8):
@@ -200,7 +201,7 @@ def cameraMove(direction, isLong):
     elif direction == "L":
         moveCameraLeft(isLong)
     else:
-        print("Bad Camera Direction: {0}".format(direction))
+        logger.warning(f"Bad Camera Direction: {direction}")
 
 
 def videoStreamOn():
@@ -236,28 +237,15 @@ def saveActionToDb(actionType, actionValue):
 
 
 def load_growth_plan():
+    global GROWTH_PLAN
+
     client = boto3.client('dynamodb')
     try:
-        response = client.get_item(TableName='Test_Planters', Key={
-                                   'UUID': {'S': str(MY_ID)}})
-        r = dynamo_json.loads(response)
-
-        global GROWTH_PLAN
-        GROWTH_PLAN = r
-        # time_activated = r['Item']['TimeActivated']
-        # local_time = time.ctime(time_activated)
-        # print("Local time:", local_time)
-        # current_time = time.time()
-        # current_time = str(current_time)
-        # needed_day = float(current_time) - float(time_activated)
-        # needed_day = int(needed_day / 86400)
-        # phases = r['Item']['activeGrowthPlan']['phases']
-        # for phase in phases:
-        #     if int(phase['fromDay']) <= needed_day < int(phase['toDay']):
-        # print(phase)
+        response = client.get_item(TableName='Test_Planters', Key={'UUID': {'S': str(MY_ID)}})
+        GROWTH_PLAN = dynamo_json.loads(response)
 
     except Exception:
-        print('Error loading growth plan')
+        logger.error('Error loading growth plan')
 
 
 def getSubPhase():
@@ -276,20 +264,6 @@ def getSubPhase():
                 if fromHour <= now.hour < int(subphase['toHour']):
                     return subphase
 
-
-# def getNeededTemp():
-#     subphase = getSubPhase()
-#     return subphase['temperature']['min'], subphase['temperature']['max']
-
-
-# def getNeededUV():
-#     subphase = getSubPhase()
-#     return subphase['uvIntensity']['min'], subphase['uvIntensity']['max']
-
-
-# def getNeededHumid():
-#     subphase = getSubPhase()
-#     return subphase['soilHumidity']['min'], subphase['soilHumidity']['max']
 
 def getMeasurementsForCurrentSubphase(subPhase):
     table = dynamodb.Table('PlantersMeasurements')
@@ -330,6 +304,7 @@ def setMeasurements(command):
 def on_message(message):
     global MY_ID, STREAM_PROCCESS_NAME
     global isUVOn
+    global isManualUVOn
     global isHeaterOn
     global isFanOn
     global UV_LAMP_GPIO
@@ -346,12 +321,17 @@ def on_message(message):
     if command[2] == "PING":
         return "PONG"
 
+    if command[2] == "GET_MEASUREMENTS":
+        return "MEASUREMENTS"
+
     if command[2] == "UV_LAMP_ON" and not isUVOn:
         uvOn()
+        isManualUVOn = True
         return "UV_LAMP_IS_ON"
 
     if command[2] == "UV_LAMP_OFF" and isUVOn:
         uvOff()
+        isManualUVOn = False
         return "UV_LAMP_IS_OFF"
 
     if command[2] == "HEATER_ON" and not isHeaterOn:
@@ -405,10 +385,10 @@ def on_message(message):
 
     if command[2] == "UV_LAMP_STATUS":
         return "LAMP_IS_ON" if isUVOn else "LAMP_IS_OFF"
-    
+
     if command[2] == "HEATER_STATUS":
         return "HEATER_IS_ON" if isHeaterOn else "HEATER_IS_OFF"
-    
+
     if command[2] == "FAN_STATUS":
         return "FAN_IS_ON" if isFanOn else "FAN_IS_OFF"
 
@@ -451,9 +431,10 @@ def handleGrowthPlantUvAverage(subPhase):
     logger.info(
         f'UV Check [ now: {uvNow:0} | mean {uvAvgNow:0.3f} | min: {uvMin:0} ]')
 
-    if uvAvgNow <= uvMin and uvNow <= uvMin and not isUVOn:
-        uvOn()
-    elif isUVOn:
+    if uvAvgNow <= uvMin and uvNow <= uvMin:
+        if not isUVOn:
+            uvOn()
+    elif isUVOn and not isManualUVOn:
         uvOff()
 
 
@@ -491,7 +472,11 @@ async def websocket_handler():
             if result == "Ignore":
                 continue
 
-            answer = f'{{\"action":"message","message":"FROM_PLANTER;e0221623-fb88-4fbd-b524-6f0092463c93;{result}"}}'
+            if result == "MEASUREMENTS" and measurements["isInitiated"] == True:
+                answer = f'{{\"action":"message","message":"FROM_PLANTER;{MY_ID};MEASUREMENTS;T:{measurements["ambientTemperature"]};UV:{measurements["uvIntensity"]};SH:{measurements["soilHumidity"]};AH:{measurements["airHumidity"]}"}}'
+            else:
+                answer = f'{{\"action":"message","message":"FROM_PLANTER;e0221623-fb88-4fbd-b524-6f0092463c93;{result}"}}'
+
             await websocket.send(answer)
             logger.info(f'>>> {result}')
 

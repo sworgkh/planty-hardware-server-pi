@@ -1,8 +1,12 @@
+import sys
+sys.path = ['', '/usr/lib/python37.zip', '/usr/lib/python3.7', '/usr/lib/python3.7/lib-dynload',
+            '/home/pi/.local/lib/python3.7/site-packages', '/usr/local/lib/python3.7/dist-packages', '/usr/lib/python3/dist-packages']
+
 import picamera
 import boto3
 from botocore.exceptions import ClientError
 from datetime import datetime
-
+import signal
 import asyncio
 import websockets
 import pathlib
@@ -11,7 +15,31 @@ import time
 import subprocess
 import json
 import decimal
-import sys
+import logging
+import logging.config
+import psutil
+
+class CheckComplete(Exception):
+    pass
+
+class CheckFailedToCaptureImage(Exception):
+    pass
+
+
+logging.config.fileConfig('/home/pi/Desktop/python/dailyPicTest/logging.conf')
+logger = logging.getLogger('camcapture')
+
+STREAM_PROCCESS_NAME = "kinesis_video_g"
+
+def checkIfProcessRunning(processName):
+    for proc in psutil.process_iter():
+        try:
+            if processName.lower() in proc.name().lower():
+                return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+    return False
+
 
 def upload_file(file_name, bucket, object_name=None):
     """Upload a file to an S3 bucket
@@ -32,46 +60,35 @@ def upload_file(file_name, bucket, object_name=None):
         response = s3_client.upload_file(file_name, bucket, object_name)
     except ClientError as e:
         return False
-    
+
     return True
+
 
 def take_pic():
     try:
+        with picamera.PiCamera() as camera:
+            camera.capture('snapshot.jpg', resize=(800, 600))
 
-        camera = picamera.PiCamera()
-        
-        #camera.start_preview()
-        camera.capture('snapshot.jpg',resize=(800, 600))
-        #camera.stop_preview()
-        
-        objectName = 'public/Test/Lopez/cam_capture'
-        dateTimeObj = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
-        
-        objectName = objectName + '/capture-' + dateTimeObj + '.jpg'
-        print('Saving ',objectName)
-        
-        
-        with open('snapshot.jpg', "rb") as f:
-            
+            objectName = 'public/Test/Lopez/cam_capture'
+            dateTimeObj = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+
+            objectName = objectName + '/capture-' + dateTimeObj + '.jpg'
+            logger.info('Saving ', objectName)
             res = upload_file('snapshot.jpg', "pictures-bucket-planty165521-planty", objectName)
             if res:
-                print('File was saved')
-                #send to socket
-                #'FROM_PLANTER;' + this.state.item.UUID +';CHECK_IMAGE;' + objectName, 
-                # websocket_send(result)   
+                logger.info('File was saved')
                 return objectName
             else:
-                print('Save failed,will try in 1 day')   
-                return None 
-        
-    except:
-        print('Unable to open camera')
+                logger.info('Save failed,will try in 1 day')
+                return None
 
-    
+    except:
+        logger.error('Unable to open camera')
+
 
 def save_to_dynamo_db():
     dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
-    table = dynamodb.Table('Test_Planters')    
+    table = dynamodb.Table('Test_Planters')
     response = table.update_item(
         Key={
             'UUID': 'e0221623-fb88-4fbd-b524-6f0092463c93',
@@ -83,69 +100,71 @@ def save_to_dynamo_db():
         ReturnValues="UPDATED_NEW"
     )
 
-    print("UpdateItem succeeded:")
+    logger.info("UpdateItem succeeded:")
     sys.exit()
-
 
 
 def on_message(message):
     command = (str)(message).split(";")
-    print(f'<<< {command[2]}')
-    print(command)
-
     if command[2] == "IMAGE_STATUS" and command[4] == "sick":
         save_to_dynamo_db()
-    
+        logger.warning("Plant is Sick! :(")
+        raise CheckComplete
 
     if command[2] == "IMAGE_STATUS" and command[4] == "healthy":
-        sys.exit()
-     
-    
-async def websocket_handler():
-    picName = take_pic()
-    file1 = open('log.txt', 'w') 
-    if picName == None:
-        s = "Failed to take picture\n"
-        
-        # Writing a string to file 
-        file1.write(s) 
-        
-        
-        # Closing file 
-        
-    
-        file1.close() 
-        sys.exit()
-    picName = picName.replace('public/','') 
-    s = "Took picture "+ picName +"\n"
-        
-    # Writing a string to file 
-    file1.write(s)
-    file1.close() 
+        logger.info("Plant is Healthy! :)")
+        raise CheckComplete
 
+
+async def websocket_handler():
+    global STREAM_PROCCESS_NAME
     uri = "wss://0xl08k0h22.execute-api.eu-west-1.amazonaws.com/dev"
+
     async with websockets.connect(uri, ssl=True) as websocket:
-        print("Connected to Websocket\n")
-        i = 0
+        logger.info("Connected to Websocket\n")
+        
+        if not checkIfProcessRunning(STREAM_PROCCESS_NAME):
+            picName = take_pic()
+        else:
+            raise CheckFailedToCaptureImage
+            # logger.info("Video stream is Active. Stopping!")
+            # videoStreamOff()
+            # logger.info("Video Stream OFF")
+            # time.sleep(2)
+            # picName = take_pic()
+            # logger.info("Starting Video Stream")
+            # videoStreamOn()
+            # logger.info("Video Stream ON")
+       
+
+        if picName == None:
+            raise CheckFailedToCaptureImage
+        
+        picName = picName.replace('public/', '')
+        logger.info(f'Took picture "{picName}""')
+        
+        
+        isMessageSent = False
+
         msg = f'{{\"action":"message","message":"FROM_PLANTER;PI;CHECK_IMAGE;{picName};;"}}'
         await websocket.send(msg)
         while True:
             message = await websocket.recv()
             semicolonCount = sum(map(lambda x: 1 if ';' in x else 0, message))
-            if semicolonCount != 4:
-                print(message)
-                print("Bad Command")
+            if semicolonCount != 2 and semicolonCount != 5 and semicolonCount != 6 and semicolonCount != 4:
+                logger.warning(message)
+                logger.warning("Bad Command")
                 answer = '{{\"action":"message","message":"FROM_PLANTER;e0221623-fb88-4fbd-b524-6f0092463c93;BAD_COMMAND"}}'
                 await websocket.send(answer)
                 continue
+
             on_message(message)
 
-
-            if i == 0:
+            if not isMessageSent:
                 msg = f'{{\"action":"message","message":"FROM_PLANTER;PI;CHECK_IMAGE;{picName};;"}}'
                 await websocket.send(msg)
-                i = 1
-    
+                isMessageSent = True
+
 
 if __name__ == "__main__":
     retryCounter = 0
@@ -154,11 +173,17 @@ if __name__ == "__main__":
         try:
             asyncio.get_event_loop().run_until_complete(websocket_handler())
         except websockets.exceptions.ConnectionClosedOK:
-            print("Connection closed by server.\n Reconnecting.\n")
+            logger.warning("Connection closed by server.\n Reconnecting.\n")
         except websockets.exceptions.ConnectionClosedError:
-            print("Connection closed by server error.\n Reconnecting.\n")
+            logger.warning(
+                "Connection closed by server error.\n Reconnecting.\n")
             retryCounter = retryCounter+1
-        except:
-            print("Unexpected error:", sys.exc_info()[0])
+        except CheckComplete:
+            retryCounter = 100
+            logger.info("Image Check Complete")
+        except CheckFailedToCaptureImage:
+            logger.error("Failed to capture image.")
             raise
-           
+        except:
+            logger.critical("Unexpected error:", sys.exc_info()[0])
+            raise
