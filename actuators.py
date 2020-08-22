@@ -1,16 +1,16 @@
 from plantyutils import DecimalEncoder
+from datetime import datetime, timedelta, timezone
+import time
+import subprocess
+import decimal
+import sys
 import asyncio
 import websockets
 import pathlib
 import ssl
-import time
-from datetime import datetime, timedelta, timezone
-import subprocess
 import boto3
 from boto3.dynamodb.conditions import Key
 import json
-import decimal
-import sys
 import psutil
 from dynamodb_json import json_util as dynamo_json
 import logging
@@ -18,8 +18,10 @@ import RPi.GPIO as GPIO
 import logging.config
 import statistics
 
+# All the logger configuration is in the "./logger.conf" file
 logging.config.fileConfig('logging.conf')
-# create logger
+
+# Create logger
 logger = logging.getLogger('actuators')
 
 retryCounter = 0
@@ -77,6 +79,7 @@ GPIO.setup(WATER_CONTROL_GPIO, GPIO.OUT, initial=1)
 GPIO.setup(HEATER_CONTROL_GPIO, GPIO.OUT, initial=1)
 GPIO.setup(FAN_CONTROL_GPIO, GPIO.OUT, initial=1)
 
+# Requires AWS CLI to be configured with security keys 
 dynamodb = boto3.resource('dynamodb', region_name='eu-west-1',
                           endpoint_url="https://dynamodb.eu-west-1.amazonaws.com")
 plantersActionsTable = dynamodb.Table('PlantersActions')

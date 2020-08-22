@@ -22,21 +22,20 @@ import itertools
 import logging
 import logging.config
 
+# All the logger configuration is in the "./logger.conf" file
 logging.config.fileConfig('logging.conf')
 # create logger
 logger = logging.getLogger('sensors')
 
 
+# Requires AWS CLI to be configured with security keys
 dynamodb = boto3.resource('dynamodb', region_name='eu-west-1',
                           endpoint_url="https://dynamodb.eu-west-1.amazonaws.com")
 plantersMeasurementsTable = dynamodb.Table('PlantersMeasurements')
 
-# logger = logging.getLogger('websockets')
-# logger.setLevel(logging.INFO)
-# logger.addHandler(logging.StreamHandler())
-
 MY_ID = "e0221623-fb88-4fbd-b524-6f0092463c93"
 
+# we use an average value of last 20 measuremants.
 bufferSize = 20
 soilHumidityBuffer = collections.deque([0.0]*bufferSize, bufferSize)
 soilHumidityBufferCount = 0
@@ -79,8 +78,7 @@ def saveMeasurementsToDb(ambientTemperatureCelsius, uvIntesity, soilHumidity):
                 "uvIntesity": uvIntesity,
                 "soilHumidity": decimal.Decimal(str(soilHumidity)),
                 "ambientTemperatureCelsius": decimal.Decimal(str(ambientTemperatureCelsius))
-            }
-        )
+            })
 
         if(response["ResponseMetadata"]["HTTPStatusCode"] == 200):
             logger.info("Saved To Database.")
@@ -109,15 +107,13 @@ async def websocket_handler():
             except:
                 logger.error(f'Failed to initiate Sensor:\n{sys.exc_info()[0]}')
                 raise
-                # TODO Add Sensors exceptions and implement retry
 
             maxHumidity = 23150
             minHumidity = 10500
 
             while True:
                 soilHumidityRaw = humiditySensor.value
-                sh = (100-float((soilHumidityRaw-minHumidity)
-                                * 100 / (maxHumidity-minHumidity)))/100
+                sh = (100-float((soilHumidityRaw-minHumidity) * 100 / (maxHumidity-minHumidity)))/100
                 setSoilHumidity(sh)
 
                 uv_raw = uv.uv_raw

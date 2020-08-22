@@ -43,7 +43,6 @@ def checkIfProcessRunning(processName):
 
 def upload_file(file_name, bucket, object_name=None):
     """Upload a file to an S3 bucket
-
     :param file_name: File to upload
     :param bucket: Bucket to upload to
     :param object_name: S3 object name. If not specified then file_name is used
@@ -127,22 +126,12 @@ async def websocket_handler():
             picName = take_pic()
         else:
             raise CheckFailedToCaptureImage
-            # logger.info("Video stream is Active. Stopping!")
-            # videoStreamOff()
-            # logger.info("Video Stream OFF")
-            # time.sleep(2)
-            # picName = take_pic()
-            # logger.info("Starting Video Stream")
-            # videoStreamOn()
-            # logger.info("Video Stream ON")
-       
 
         if picName == None:
             raise CheckFailedToCaptureImage
         
         picName = picName.replace('public/', '')
         logger.info(f'Took picture "{picName}""')
-        
         
         isMessageSent = False
 
