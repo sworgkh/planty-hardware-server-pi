@@ -449,8 +449,9 @@ def handleGrowthPlantTemperature(subPhase):
         return
     temperatureAvgNow = statistics.mean(activeSubPhase["temperatureValues"])
     temperatureNow = measurements["ambientTemperature"]
-    temperatureMin = subPhase["tempoerature"]["min"]
-    logger.info(f'Temperature Check [ now: {temperatureNow:0} | mean {temperatureAvgNow:0.3f} | min: {temperatureMin:0} ]')
+    temperatureMin = subPhase["temperature"]["min"]
+    temperatureMax = subPhase["temperature"]["max"]
+    logger.info(f'Temperature Check [ now: {temperatureNow:0.3f} | mean {temperatureAvgNow:0.3f} | min: {temperatureMin:0.3f}   | max: {temperatureMax:0.3f}]')
 
     if temperatureAvgNow < temperatureMin:
         if not isHeaterOn:
