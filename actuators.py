@@ -88,7 +88,8 @@ waterAddedTime = datetime(2000, 1, 1)
 activeSubPhase = {
     "subPhase": {"name": ""},
     "startTimeStamp": datetime(2000, 1, 1),
-    "uvValues": []
+    "uvValues": [],
+    "temperatureValues":[]
 
 }
 measurements = {
@@ -287,7 +288,8 @@ def getMeasurementsForCurrentSubphase(subPhase):
         items = response["Items"]
         for m in items:
             activeSubPhase["uvValues"].append(m["uvIntesity"])
-        logger.info("Loaded UV values for Current Phase")
+            activeSubPhase["temperatureValues"].append(m["temperature"])
+        logger.info("Loaded values for Current Phase")
 
     except:
         logger.critical("Failed to load SubPhase Measurements till now")
@@ -297,6 +299,7 @@ def getMeasurementsForCurrentSubphase(subPhase):
 def setMeasurements(command):
     measurements["timeStamp"] = datetime.utcnow()
     measurements["ambientTemperature"] = (float)((command[3]).split(":")[1])
+    activeSubPhase["temperature"].append(measurements["ambientTemperature"])
     measurements["uvIntensity"] = (int)((command[4]).split(":")[1])
     activeSubPhase["uvValues"].append(measurements["uvIntensity"])
     measurements["soilHumidity"] = (float)((command[5]).split(":")[1])
@@ -440,6 +443,27 @@ def handleGrowthPlantUvAverage(subPhase):
     elif isUVOn and not isManualUVOn:
         uvOff()
 
+def handleGrowthPlantTemperature(subPhase):
+    if(subPhase["temperature"] == None or subPhase["temperature"]["min"] == None):
+        logger.error("Failed To read Subphase Temperature values. Skipping Temperature check.")
+        return
+    temperatureAvgNow = statistics.mean(activeSubPhase["temperatureValues"])
+    temperatureNow = measurements["ambientTemperature"]
+    temperatureMin = subPhase["tempoerature"]["min"]
+    logger.info(f'Temperature Check [ now: {temperatureNow:0} | mean {temperatureAvgNow:0.3f} | min: {temperatureMin:0} ]')
+
+    if temperatureAvgNow < temperatureMin:
+        if not isHeaterOn:
+            heaterOn()
+            fanOff()
+    elif temperatureAvgNow > temperatureMax:
+        heaterOff()
+        fanOn()
+    else:
+        if isHeaterOn:
+            heaterOff()
+        if isFanOn:
+            fanOff()    
 
 def applyGrowthPlan():
     if measurements["isInitiated"]:
@@ -453,6 +477,7 @@ def applyGrowthPlan():
 
         handleGrowthPlantSoilHumidity(subPhase)
         handleGrowthPlantUvAverage(subPhase)
+        handleGrowthPlantTemperature(subPhase)
 
 
 async def websocket_handler():
